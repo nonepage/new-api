@@ -16,7 +16,7 @@ version: '3.4' # For compatibility with older Docker versions
 
 services:
   new-api:
-    image: calciumion/new-api:v2026.03.10-payment-referral
+    image: ghcr.io/nonepage/new-api:v2026.03.10-payment-referral-ghcr
     container_name: new-api
     restart: always
     command: --log-dir /app/logs
