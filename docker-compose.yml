@@ -39,6 +39,8 @@ services:
 #      - UMAMI_WEBSITE_ID=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx  # Umami 网站 ID (Umami Website ID)
 #      - UMAMI_SCRIPT_URL=https://analytics.umami.is/script.js  # Umami 脚本 URL，默认为官方地址 (Umami Script URL, defaults to official URL)
 
+      - GROUP_QR_CODE_URL=https://doc.xcode.best/qq.jpg  # 面板顶部加群二维码图片地址
+
     depends_on:
       - redis
       - postgres
