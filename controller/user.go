@@ -365,14 +365,30 @@ func GetAffCode(c *gin.Context) {
 	return
 }
 
-func GetReferralCommissions(c *gin.Context) {
+func GetInvitedUsers(c *gin.Context) {
 	id := c.GetInt("id")
-	commissions, err := model.GetUserReferralCommissions(id)
+	pageInfo := common.GetPageQuery(c)
+	users, total, err := model.GetInvitedUsers(id, pageInfo)
 	if err != nil {
 		common.ApiError(c, err)
 		return
 	}
-	common.ApiSuccess(c, commissions)
+	pageInfo.SetTotal(int(total))
+	pageInfo.SetItems(users)
+	common.ApiSuccess(c, pageInfo)
+}
+
+func GetReferralCommissions(c *gin.Context) {
+	id := c.GetInt("id")
+	pageInfo := common.GetPageQuery(c)
+	commissions, total, err := model.GetUserReferralCommissions(id, pageInfo)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	pageInfo.SetTotal(int(total))
+	pageInfo.SetItems(commissions)
+	common.ApiSuccess(c, pageInfo)
 }
 
 func GetSelf(c *gin.Context) {
@@ -409,11 +425,13 @@ func GetSelf(c *gin.Context) {
 		"quota":             user.Quota,
 		"used_quota":        user.UsedQuota,
 		"request_count":     user.RequestCount,
-		"aff_code":          user.AffCode,
-		"aff_count":         user.AffCount,
-		"aff_quota":         user.AffQuota,
-		"aff_history_quota": user.AffHistoryQuota,
-		"inviter_id":        user.InviterId,
+		"aff_code":                    user.AffCode,
+		"aff_count":                   user.AffCount,
+		"aff_quota":                   user.AffQuota,
+		"aff_history_quota":           user.AffHistoryQuota,
+		"aff_commission_rate":         effectiveCommissionRate(user.ReferralCommissionPercent),
+		"aff_commission_max_recharges": common.ReferralCommissionMaxRecharges,
+		"inviter_id":                  user.InviterId,
 		"linux_do_id":       user.LinuxDOId,
 		"setting":           user.Setting,
 		"stripe_customer":   user.StripeCustomer,
@@ -427,6 +445,13 @@ func GetSelf(c *gin.Context) {
 		"data":    responseData,
 	})
 	return
+}
+
+func effectiveCommissionRate(perUser *float64) float64 {
+	if perUser != nil {
+		return *perUser
+	}
+	return common.ReferralCommissionPercent
 }
 
 // 计算用户权限的辅助函数
