@@ -22,10 +22,13 @@ import NewYearButton from './NewYearButton';
 import NotificationButton from './NotificationButton';
 import ThemeToggle from './ThemeToggle';
 import LanguageSelector from './LanguageSelector';
+import GroupQRCodeButton from './GroupQRCodeButton';
 import UserArea from './UserArea';
 
 const ActionButtons = ({
   isNewYear,
+  groupQRCodeUrl,
+  groupQRCodeLink,
   unreadCount,
   onNoticeOpen,
   theme,
@@ -43,6 +46,13 @@ const ActionButtons = ({
   return (
     <div className='flex items-center gap-2 md:gap-3'>
       <NewYearButton isNewYear={isNewYear} />
+
+      <GroupQRCodeButton
+        qrCodeUrl={groupQRCodeUrl}
+        qrCodeLink={groupQRCodeLink}
+        isMobile={isMobile}
+        t={t}
+      />
 
       <NotificationButton
         unreadCount={unreadCount}
