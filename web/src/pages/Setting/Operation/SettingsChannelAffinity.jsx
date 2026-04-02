@@ -540,6 +540,15 @@ export default function SettingsChannelAffinity(props) {
       render: (v) => <Text>{Number(v || 0) || '-'}</Text>,
     },
     {
+      title: t('失败后是否重试'),
+      dataIndex: 'skip_retry_on_failure',
+      render: (value) => (
+        <Tag color={value ? 'orange' : 'green'} style={{ marginRight: 4 }}>
+          {value ? t('不重试') : t('重试')}
+        </Tag>
+      ),
+    },
+    {
       title: t('覆盖模板'),
       render: (_, record) => {
         if (!record?.param_override_template) {
