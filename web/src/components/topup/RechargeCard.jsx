@@ -109,7 +109,7 @@ const RechargeCard = ({
   useEffect(() => {
     if (initialTabSetRef.current) return;
     if (subscriptionLoading) return;
-    setActiveTab('topup');
+    setActiveTab(shouldShowSubscription ? 'subscription' : 'topup');
     initialTabSetRef.current = true;
   }, [shouldShowSubscription, subscriptionLoading]);
 

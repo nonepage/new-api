@@ -1105,6 +1105,18 @@ export default function SettingsChannelAffinity(props) {
             </Col>
           </Row>
 
+          <Row gutter={16} style={{ marginTop: 12 }}>
+            <Col xs={24} sm={12}>
+              <Form.Switch
+                field='skip_retry_on_failure'
+                label={t('失败后不重试')}
+              />
+              <Text type='tertiary' size='small'>
+                {t('开启后，若该规则命中且请求失败，将不会切换渠道重试。')}
+              </Text>
+            </Col>
+          </Row>
+
           <Collapse
             keepDOM
             activeKey={modalAdvancedActiveKey}
@@ -1257,18 +1269,6 @@ export default function SettingsChannelAffinity(props) {
                   />
                   <Text type='tertiary' size='small'>
                     {t('开启后，规则名称会参与 cache key（不同规则隔离）。')}
-                  </Text>
-                </Col>
-              </Row>
-
-              <Row gutter={16}>
-                <Col xs={24} sm={12}>
-                  <Form.Switch
-                    field='skip_retry_on_failure'
-                    label={t('失败后不重试')}
-                  />
-                  <Text type='tertiary' size='small'>
-                    {t('开启后，若该规则命中且请求失败，将不会切换渠道重试。')}
                   </Text>
                 </Col>
               </Row>

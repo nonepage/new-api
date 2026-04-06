@@ -254,9 +254,6 @@ func migrateDB() error {
 	if err := migrateTokenModelLimitsToText(); err != nil {
 		return err
 	}
-	if err := prepareReferralCommissionMigration(); err != nil {
-		return err
-	}
 
 	err := DB.AutoMigrate(
 		&Channel{},
@@ -283,7 +280,6 @@ func migrateDB() error {
 		&SubscriptionPreConsumeRecord{},
 		&CustomOAuthProvider{},
 		&UserOAuthBinding{},
-		&ReferralCommission{},
 	)
 	if err != nil {
 		return err
@@ -301,9 +297,6 @@ func migrateDB() error {
 }
 
 func migrateDBFast() error {
-	if err := prepareReferralCommissionMigration(); err != nil {
-		return err
-	}
 
 	var wg sync.WaitGroup
 
@@ -335,7 +328,6 @@ func migrateDBFast() error {
 		{&SubscriptionPreConsumeRecord{}, "SubscriptionPreConsumeRecord"},
 		{&CustomOAuthProvider{}, "CustomOAuthProvider"},
 		{&UserOAuthBinding{}, "UserOAuthBinding"},
-		{&ReferralCommission{}, "ReferralCommission"},
 	}
 	// 动态计算migration数量，确保errChan缓冲区足够大
 	errChan := make(chan error, len(migrations))
@@ -370,63 +362,6 @@ func migrateDBFast() error {
 		}
 	}
 	common.SysLog("database migrated")
-	return nil
-}
-
-func prepareReferralCommissionMigration() error {
-	tableName := "referral_commissions"
-	if !DB.Migrator().HasTable(tableName) {
-		return nil
-	}
-	referralCommissionModel := &ReferralCommission{}
-	requiredColumns := []string{"id", "invitee_id", "top_up_id", "payment_method"}
-	for _, column := range requiredColumns {
-		if !DB.Migrator().HasColumn(referralCommissionModel, column) {
-			return nil
-		}
-	}
-
-	var dedupeSQL string
-	switch {
-	case common.UsingPostgreSQL:
-		dedupeSQL = `
-DELETE FROM referral_commissions a
-USING referral_commissions b
-WHERE a.invitee_id = b.invitee_id
-  AND a.top_up_id = b.top_up_id
-  AND a.payment_method = b.payment_method
-  AND a.id > b.id`
-	case common.UsingSQLite:
-		dedupeSQL = `
-DELETE FROM referral_commissions
-WHERE id IN (
-	SELECT duplicate_id FROM (
-		SELECT a.id AS duplicate_id
-		FROM referral_commissions a
-		JOIN referral_commissions b
-		  ON a.invitee_id = b.invitee_id
-		 AND a.top_up_id = b.top_up_id
-		 AND a.payment_method = b.payment_method
-		 AND a.id > b.id
-	)
-)`
-	default:
-		dedupeSQL = `
-DELETE a FROM referral_commissions a
-INNER JOIN referral_commissions b
-        ON a.invitee_id = b.invitee_id
-       AND a.top_up_id = b.top_up_id
-       AND a.payment_method = b.payment_method
-       AND a.id > b.id`
-	}
-
-	result := DB.Exec(dedupeSQL)
-	if result.Error != nil {
-		return result.Error
-	}
-	if result.RowsAffected > 0 {
-		common.SysLog(fmt.Sprintf("removed %d duplicate referral commission rows before migration", result.RowsAffected))
-	}
 	return nil
 }
 

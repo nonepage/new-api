@@ -359,11 +359,6 @@ func EpayNotify(c *gin.Context) {
 			}
 			log.Printf("易支付回调更新用户成功 %v", topUp)
 			model.RecordLog(topUp.UserId, model.LogTypeTopup, fmt.Sprintf("使用在线充值成功，充值金额: %v，支付金额：%f", logger.LogQuota(quotaToAdd), topUp.Money))
-			// Credit referral commission to inviter (if enabled)
-			if err := model.CreditReferralCommission(topUp.UserId, topUp.Money, "epay", topUp.Id); err != nil {
-				log.Printf("返佣失败 user_id=%d topup_id=%d trade_no=%s payment_method=%s err=%v",
-					topUp.UserId, topUp.Id, topUp.TradeNo, topUp.PaymentMethod, err)
-			}
 		}
 	} else {
 		log.Printf("易支付异常回调: %v", verifyInfo)
