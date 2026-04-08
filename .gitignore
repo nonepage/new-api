@@ -29,3 +29,4 @@ data/
 .gomodcache/
 .gocache-temp
 .gopath
+db-backup-before-online-import-20260408-201511.sql

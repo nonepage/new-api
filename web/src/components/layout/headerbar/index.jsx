@@ -61,6 +61,8 @@ const HeaderBar = ({ onMobileMenuToggle, drawerOpen }) => {
     handleNoticeClose,
     getUnreadKeys,
   } = useNotifications(statusState);
+  const groupQRCodeUrl = statusState?.status?.group_qr_code_url || '';
+  const groupQRCodeLink = statusState?.status?.group_qr_code_link || '';
 
   const { mainNavLinks } = useNavigation(t, docsLink, headerNavModules);
 
@@ -109,6 +111,8 @@ const HeaderBar = ({ onMobileMenuToggle, drawerOpen }) => {
 
           <ActionButtons
             isNewYear={isNewYear}
+            groupQRCodeUrl={groupQRCodeUrl}
+            groupQRCodeLink={groupQRCodeLink}
             unreadCount={unreadCount}
             onNoticeOpen={handleNoticeOpen}
             theme={theme}

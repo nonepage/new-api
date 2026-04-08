@@ -100,6 +100,10 @@ func Recharge(referenceId string, customerId string) (err error) {
 	}
 
 	RecordLog(topUp.UserId, LogTypeTopup, fmt.Sprintf("使用在线充值成功，充值金额: %v，支付金额：%d", logger.FormatQuota(int(quota)), topUp.Amount))
+	if err := CreditReferralCommission(topUp.UserId, topUp.Money, "stripe", topUp.Id); err != nil {
+		common.SysLog(fmt.Sprintf("返佣失败 user_id=%d topup_id=%d trade_no=%s payment_method=stripe err=%v",
+			topUp.UserId, topUp.Id, topUp.TradeNo, err))
+	}
 
 	return nil
 }
@@ -249,6 +253,7 @@ func ManualCompleteTopUp(tradeNo string) error {
 	var userId int
 	var quotaToAdd int
 	var payMoney float64
+	var topUpId int
 
 	err := DB.Transaction(func(tx *gorm.DB) error {
 		topUp := &TopUp{}
@@ -295,6 +300,7 @@ func ManualCompleteTopUp(tradeNo string) error {
 
 		userId = topUp.UserId
 		payMoney = topUp.Money
+		topUpId = topUp.Id
 		return nil
 	})
 
@@ -304,6 +310,10 @@ func ManualCompleteTopUp(tradeNo string) error {
 
 	// 事务外记录日志，避免阻塞
 	RecordLog(userId, LogTypeTopup, fmt.Sprintf("管理员补单成功，充值金额: %v，支付金额：%f", logger.FormatQuota(quotaToAdd), payMoney))
+	if err := CreditReferralCommission(userId, payMoney, "manual", topUpId); err != nil {
+		common.SysLog(fmt.Sprintf("返佣失败 user_id=%d topup_id=%d payment_method=manual err=%v",
+			userId, topUpId, err))
+	}
 	return nil
 }
 func RechargeCreem(referenceId string, customerEmail string, customerName string) (err error) {
@@ -373,6 +383,10 @@ func RechargeCreem(referenceId string, customerEmail string, customerName string
 	}
 
 	RecordLog(topUp.UserId, LogTypeTopup, fmt.Sprintf("使用Creem充值成功，充值额度: %v，支付金额：%.2f", quota, topUp.Money))
+	if err := CreditReferralCommission(topUp.UserId, topUp.Money, "creem", topUp.Id); err != nil {
+		common.SysLog(fmt.Sprintf("返佣失败 user_id=%d topup_id=%d trade_no=%s payment_method=creem err=%v",
+			topUp.UserId, topUp.Id, topUp.TradeNo, err))
+	}
 
 	return nil
 }
@@ -431,6 +445,10 @@ func RechargeWaffo(tradeNo string) (err error) {
 
 	if quotaToAdd > 0 {
 		RecordLog(topUp.UserId, LogTypeTopup, fmt.Sprintf("Waffo充值成功，充值额度: %v，支付金额: %.2f", logger.FormatQuota(quotaToAdd), topUp.Money))
+	}
+	if err := CreditReferralCommission(topUp.UserId, topUp.Money, "waffo", topUp.Id); err != nil {
+		common.SysLog(fmt.Sprintf("返佣失败 user_id=%d topup_id=%d trade_no=%s payment_method=waffo err=%v",
+			topUp.UserId, topUp.Id, topUp.TradeNo, err))
 	}
 
 	return nil
