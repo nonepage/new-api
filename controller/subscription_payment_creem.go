@@ -84,8 +84,12 @@ func SubscriptionRequestCreemPay(c *gin.Context) {
 		UserId:        userId,
 		PlanId:        plan.Id,
 		Money:         plan.PriceAmount,
+		PaidAmount:    plan.PriceAmount,
+		PaidCurrency:  plan.Currency,
 		TradeNo:       referenceId,
 		PaymentMethod: PaymentMethodCreem,
+		ClientIP:      c.ClientIP(),
+		UserAgent:     c.Request.UserAgent(),
 		CreateTime:    time.Now().Unix(),
 		Status:        common.TopUpStatusPending,
 	}

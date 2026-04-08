@@ -193,13 +193,17 @@ func (p *SubscriptionPlan) BeforeUpdate(tx *gorm.DB) error {
 
 // Subscription order (payment -> webhook -> create UserSubscription)
 type SubscriptionOrder struct {
-	Id     int     `json:"id"`
-	UserId int     `json:"user_id" gorm:"index"`
-	PlanId int     `json:"plan_id" gorm:"index"`
-	Money  float64 `json:"money"`
+	Id           int     `json:"id"`
+	UserId       int     `json:"user_id" gorm:"index"`
+	PlanId       int     `json:"plan_id" gorm:"index"`
+	Money        float64 `json:"money"`
+	PaidAmount   float64 `json:"paid_amount" gorm:"type:decimal(12,6);default:0"`
+	PaidCurrency string  `json:"paid_currency" gorm:"type:varchar(16);default:''"`
 
 	TradeNo       string `json:"trade_no" gorm:"unique;type:varchar(255);index"`
 	PaymentMethod string `json:"payment_method" gorm:"type:varchar(50)"`
+	ClientIP      string `json:"client_ip" gorm:"type:varchar(64);default:''"`
+	UserAgent     string `json:"user_agent" gorm:"type:text"`
 	Status        string `json:"status"`
 	CreateTime    int64  `json:"create_time"`
 	CompleteTime  int64  `json:"complete_time"`
@@ -589,8 +593,14 @@ func upsertSubscriptionTopUpTx(tx *gorm.DB, order *SubscriptionOrder) error {
 				UserId:        order.UserId,
 				Amount:        0,
 				Money:         order.Money,
+				PaidAmount:    order.PaidAmount,
+				PaidCurrency:  order.PaidCurrency,
 				TradeNo:       order.TradeNo,
 				PaymentMethod: order.PaymentMethod,
+				SourceType:    common.TopUpSourceSubscription,
+				ClientIP:      order.ClientIP,
+				UserAgent:     order.UserAgent,
+				InvoiceStatus: common.InvoiceStatusNone,
 				CreateTime:    order.CreateTime,
 				CompleteTime:  now,
 				Status:        common.TopUpStatusSuccess,
@@ -600,8 +610,26 @@ func upsertSubscriptionTopUpTx(tx *gorm.DB, order *SubscriptionOrder) error {
 		return err
 	}
 	topup.Money = order.Money
+	if order.PaidAmount > 0 {
+		topup.PaidAmount = order.PaidAmount
+	}
+	if order.PaidCurrency != "" {
+		topup.PaidCurrency = order.PaidCurrency
+	}
 	if topup.PaymentMethod == "" {
 		topup.PaymentMethod = order.PaymentMethod
+	}
+	if topup.SourceType == "" {
+		topup.SourceType = common.TopUpSourceSubscription
+	}
+	if topup.ClientIP == "" {
+		topup.ClientIP = order.ClientIP
+	}
+	if topup.UserAgent == "" {
+		topup.UserAgent = order.UserAgent
+	}
+	if topup.InvoiceStatus == "" {
+		topup.InvoiceStatus = common.InvoiceStatusNone
 	}
 	if topup.CreateTime == 0 {
 		topup.CreateTime = order.CreateTime

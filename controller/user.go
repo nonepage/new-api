@@ -456,6 +456,7 @@ func effectiveCommissionRate(perUser *float64) float64 {
 
 // 计算用户权限的辅助函数
 func calculateUserPermissions(userRole int) map[string]interface{} {
+func calculateUserPermissions(userRole int) map[string]interface{} {
 	permissions := map[string]interface{}{}
 
 	// 根据用户角色计算权限

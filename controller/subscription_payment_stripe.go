@@ -87,8 +87,12 @@ func SubscriptionRequestStripePay(c *gin.Context) {
 		UserId:        userId,
 		PlanId:        plan.Id,
 		Money:         plan.PriceAmount,
+		PaidAmount:    plan.PriceAmount,
+		PaidCurrency:  plan.Currency,
 		TradeNo:       referenceId,
 		PaymentMethod: PaymentMethodStripe,
+		ClientIP:      c.ClientIP(),
+		UserAgent:     c.Request.UserAgent(),
 		CreateTime:    time.Now().Unix(),
 		Status:        common.TopUpStatusPending,
 	}

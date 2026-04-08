@@ -220,3 +220,31 @@ const (
 	TopUpStatusFailed  = "failed"
 	TopUpStatusExpired = "expired"
 )
+
+const (
+	TopUpSourceWalletTopUp  = "wallet_topup"
+	TopUpSourceSubscription = "subscription"
+	TopUpSourceAdminManual  = "admin_manual"
+	TopUpSourceSystemGrant  = "system_grant"
+)
+
+const (
+	InvoiceStatusNone          = "none"
+	InvoiceStatusPendingReview = "pending_review"
+	InvoiceStatusApproved      = "approved"
+	InvoiceStatusIssued        = "issued"
+)
+
+const (
+	InvoiceApplicationStatusPendingReview = "pending_review"
+	InvoiceApplicationStatusApproved      = "approved"
+	InvoiceApplicationStatusRejected      = "rejected"
+	InvoiceApplicationStatusIssued        = "issued"
+	InvoiceApplicationStatusCancelled     = "cancelled"
+	InvoiceApplicationStatusVoided        = "voided"
+)
+
+const (
+	InvoiceRecordStatusIssued = "issued"
+	InvoiceRecordStatusVoided = "voided"
+)
