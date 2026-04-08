@@ -80,11 +80,14 @@ const NotificationSettings = ({
     personal: {
       enabled: true,
       topup: true,
+      invoice: true,
       personal: true,
     },
     admin: {
       enabled: true,
       channel: true,
+      referral: true,
+      invoiceAdmin: true,
       models: true,
       deployment: true,
       subscription: true,
@@ -165,10 +168,12 @@ const NotificationSettings = ({
         midjourney: true,
         task: true,
       },
-      personal: { enabled: true, topup: true, personal: true },
+      personal: { enabled: true, topup: true, invoice: true, personal: true },
       admin: {
         enabled: true,
         channel: true,
+        referral: true,
+        invoiceAdmin: true,
         models: true,
         deployment: true,
         subscription: true,
@@ -279,6 +284,7 @@ const NotificationSettings = ({
       description: t('用户个人功能'),
       modules: [
         { key: 'topup', title: t('钱包管理'), description: t('余额充值管理') },
+        { key: 'invoice', title: t('发票管理'), description: t('开票申请与发票进度') },
         {
           key: 'personal',
           title: t('个人设置'),
@@ -293,6 +299,8 @@ const NotificationSettings = ({
       description: t('系统管理功能'),
       modules: [
         { key: 'channel', title: t('渠道管理'), description: t('API渠道配置') },
+        { key: 'referral', title: t('邀请管理'), description: t('邀请关系与风控排查') },
+        { key: 'invoiceAdmin', title: t('发票管理'), description: t('后台审核与统一开票') },
         { key: 'models', title: t('模型管理'), description: t('AI模型配置') },
         {
           key: 'deployment',
