@@ -9,8 +9,10 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/pkg/cachex"
 	"github.com/samber/hot"
+	"github.com/shopspring/decimal"
 	"gorm.io/gorm"
 )
 
@@ -40,6 +42,15 @@ var (
 const (
 	subscriptionPlanCacheNamespace     = "new-api:subscription_plan:v1"
 	subscriptionPlanInfoCacheNamespace = "new-api:subscription_plan_info:v1"
+)
+
+const (
+	SubscriptionStatusActive    = "active"
+	SubscriptionStatusExpired   = "expired"
+	SubscriptionStatusCancelled = "cancelled"
+
+	SubscriptionCancelReasonNone             = ""
+	SubscriptionCancelReasonWalletConversion = "wallet_conversion"
 )
 
 var (
@@ -193,13 +204,17 @@ func (p *SubscriptionPlan) BeforeUpdate(tx *gorm.DB) error {
 
 // Subscription order (payment -> webhook -> create UserSubscription)
 type SubscriptionOrder struct {
-	Id     int     `json:"id"`
-	UserId int     `json:"user_id" gorm:"index"`
-	PlanId int     `json:"plan_id" gorm:"index"`
-	Money  float64 `json:"money"`
+	Id           int     `json:"id"`
+	UserId       int     `json:"user_id" gorm:"index"`
+	PlanId       int     `json:"plan_id" gorm:"index"`
+	Money        float64 `json:"money"`
+	PaidAmount   float64 `json:"paid_amount" gorm:"type:decimal(12,6);default:0"`
+	PaidCurrency string  `json:"paid_currency" gorm:"type:varchar(16);default:''"`
 
 	TradeNo       string `json:"trade_no" gorm:"unique;type:varchar(255);index"`
 	PaymentMethod string `json:"payment_method" gorm:"type:varchar(50)"`
+	ClientIP      string `json:"client_ip" gorm:"type:varchar(64);default:''"`
+	UserAgent     string `json:"user_agent" gorm:"type:text"`
 	Status        string `json:"status"`
 	CreateTime    int64  `json:"create_time"`
 	CompleteTime  int64  `json:"complete_time"`
@@ -247,8 +262,11 @@ type UserSubscription struct {
 	LastResetTime int64 `json:"last_reset_time" gorm:"type:bigint;default:0"`
 	NextResetTime int64 `json:"next_reset_time" gorm:"type:bigint;default:0;index"`
 
-	UpgradeGroup  string `json:"upgrade_group" gorm:"type:varchar(64);default:''"`
-	PrevUserGroup string `json:"prev_user_group" gorm:"type:varchar(64);default:''"`
+	UpgradeGroup      string `json:"upgrade_group" gorm:"type:varchar(64);default:''"`
+	PrevUserGroup     string `json:"prev_user_group" gorm:"type:varchar(64);default:''"`
+	CancelReason      string `json:"cancel_reason" gorm:"type:varchar(32);default:'';index"`
+	CancelledAt       int64  `json:"cancelled_at" gorm:"type:bigint;default:0"`
+	ConversionBatchId int    `json:"conversion_batch_id" gorm:"type:int;default:0;index"`
 
 	CreatedAt int64 `json:"created_at" gorm:"bigint"`
 	UpdatedAt int64 `json:"updated_at" gorm:"bigint"`
@@ -268,6 +286,102 @@ func (s *UserSubscription) BeforeUpdate(tx *gorm.DB) error {
 
 type SubscriptionSummary struct {
 	Subscription *UserSubscription `json:"subscription"`
+}
+
+type SubscriptionConversionBatch struct {
+	Id                int     `json:"id"`
+	RequestId         string  `json:"request_id" gorm:"type:varchar(64);uniqueIndex"`
+	UserId            int     `json:"user_id" gorm:"index"`
+	Status            string  `json:"status" gorm:"type:varchar(32);index"`
+	SubscriptionCount int     `json:"subscription_count" gorm:"type:int;default:0"`
+	TotalRefundMoney  float64 `json:"total_refund_money" gorm:"type:decimal(10,6);not null;default:0"`
+	TotalRefundQuota  int64   `json:"total_refund_quota" gorm:"type:bigint;not null;default:0"`
+	UserGroupBefore   string  `json:"user_group_before" gorm:"type:varchar(64);default:''"`
+	UserGroupAfter    string  `json:"user_group_after" gorm:"type:varchar(64);default:'default'"`
+	CreatedAt         int64   `json:"created_at" gorm:"bigint"`
+	UpdatedAt         int64   `json:"updated_at" gorm:"bigint"`
+}
+
+func (b *SubscriptionConversionBatch) BeforeCreate(tx *gorm.DB) error {
+	now := common.GetTimestamp()
+	b.CreatedAt = now
+	b.UpdatedAt = now
+	return nil
+}
+
+func (b *SubscriptionConversionBatch) BeforeUpdate(tx *gorm.DB) error {
+	b.UpdatedAt = common.GetTimestamp()
+	return nil
+}
+
+type SubscriptionConversionItem struct {
+	Id                 int     `json:"id"`
+	BatchId            int     `json:"batch_id" gorm:"index"`
+	UserId             int     `json:"user_id" gorm:"index"`
+	UserSubscriptionId int     `json:"user_subscription_id" gorm:"index"`
+	PlanId             int     `json:"plan_id" gorm:"index"`
+	PlanTitle          string  `json:"plan_title" gorm:"type:varchar(128);default:''"`
+	PriceAmount        float64 `json:"price_amount" gorm:"type:decimal(10,6);not null;default:0"`
+	Currency           string  `json:"currency" gorm:"type:varchar(8);not null;default:'USD'"`
+	StartTime          int64   `json:"start_time" gorm:"bigint"`
+	EndTime            int64   `json:"end_time" gorm:"bigint"`
+	DurationSeconds    int64   `json:"duration_seconds" gorm:"type:bigint;not null;default:0"`
+	RemainingSeconds   int64   `json:"remaining_seconds" gorm:"type:bigint;not null;default:0"`
+	RefundRatio        float64 `json:"refund_ratio" gorm:"type:decimal(10,6);not null;default:0"`
+	RefundMoney        float64 `json:"refund_money" gorm:"type:decimal(10,6);not null;default:0"`
+	RefundQuota        int64   `json:"refund_quota" gorm:"type:bigint;not null;default:0"`
+	CreatedAt          int64   `json:"created_at" gorm:"bigint"`
+}
+
+func (i *SubscriptionConversionItem) BeforeCreate(tx *gorm.DB) error {
+	if i.CreatedAt == 0 {
+		i.CreatedAt = common.GetTimestamp()
+	}
+	return nil
+}
+
+type SubscriptionConversionPreviewItem struct {
+	UserSubscriptionId int     `json:"user_subscription_id"`
+	PlanId             int     `json:"plan_id"`
+	PlanTitle          string  `json:"plan_title"`
+	PriceAmount        float64 `json:"price_amount"`
+	Currency           string  `json:"currency"`
+	StartTime          int64   `json:"start_time"`
+	EndTime            int64   `json:"end_time"`
+	DurationSeconds    int64   `json:"duration_seconds"`
+	RemainingSeconds   int64   `json:"remaining_seconds"`
+	RefundRatio        float64 `json:"refund_ratio"`
+	RefundMoney        float64 `json:"refund_money"`
+	RefundQuota        int64   `json:"refund_quota"`
+}
+
+type SubscriptionConversionPreviewSummary struct {
+	SubscriptionCount int     `json:"subscription_count"`
+	TotalRefundMoney  float64 `json:"total_refund_money"`
+	TotalRefundQuota  int64   `json:"total_refund_quota"`
+	UserGroupBefore   string  `json:"user_group_before"`
+	UserGroupAfter    string  `json:"user_group_after"`
+	CanConvert        bool    `json:"can_convert"`
+}
+
+type SubscriptionConversionPreview struct {
+	Items   []SubscriptionConversionPreviewItem  `json:"items"`
+	Summary SubscriptionConversionPreviewSummary `json:"summary"`
+}
+
+type SubscriptionConversionResult struct {
+	BatchId           int     `json:"batch_id"`
+	SubscriptionCount int     `json:"subscription_count"`
+	TotalRefundMoney  float64 `json:"total_refund_money"`
+	TotalRefundQuota  int64   `json:"total_refund_quota"`
+	UserGroupBefore   string  `json:"user_group_before"`
+	UserGroupAfter    string  `json:"user_group_after"`
+	NewUserQuota      int     `json:"new_user_quota"`
+}
+
+type activeUserSubscriptionWithPlan struct {
+	Subscription UserSubscription
+	Plan         SubscriptionPlan
 }
 
 func calcPlanEndTime(start time.Time, plan *SubscriptionPlan) (int64, error) {
@@ -589,8 +703,14 @@ func upsertSubscriptionTopUpTx(tx *gorm.DB, order *SubscriptionOrder) error {
 				UserId:        order.UserId,
 				Amount:        0,
 				Money:         order.Money,
+				PaidAmount:    order.PaidAmount,
+				PaidCurrency:  order.PaidCurrency,
 				TradeNo:       order.TradeNo,
 				PaymentMethod: order.PaymentMethod,
+				SourceType:    common.TopUpSourceSubscription,
+				ClientIP:      order.ClientIP,
+				UserAgent:     order.UserAgent,
+				InvoiceStatus: common.InvoiceStatusNone,
 				CreateTime:    order.CreateTime,
 				CompleteTime:  now,
 				Status:        common.TopUpStatusSuccess,
@@ -600,8 +720,26 @@ func upsertSubscriptionTopUpTx(tx *gorm.DB, order *SubscriptionOrder) error {
 		return err
 	}
 	topup.Money = order.Money
+	if order.PaidAmount > 0 {
+		topup.PaidAmount = order.PaidAmount
+	}
+	if order.PaidCurrency != "" {
+		topup.PaidCurrency = order.PaidCurrency
+	}
 	if topup.PaymentMethod == "" {
 		topup.PaymentMethod = order.PaymentMethod
+	}
+	if topup.SourceType == "" {
+		topup.SourceType = common.TopUpSourceSubscription
+	}
+	if topup.ClientIP == "" {
+		topup.ClientIP = order.ClientIP
+	}
+	if topup.UserAgent == "" {
+		topup.UserAgent = order.UserAgent
+	}
+	if topup.InvoiceStatus == "" {
+		topup.InvoiceStatus = common.InvoiceStatusNone
 	}
 	if topup.CreateTime == 0 {
 		topup.CreateTime = order.CreateTime
@@ -715,6 +853,345 @@ func buildSubscriptionSummaries(subs []UserSubscription) []SubscriptionSummary {
 		})
 	}
 	return result
+}
+
+func getUserQuotaByIdTx(tx *gorm.DB, userId int) (int, error) {
+	if userId <= 0 {
+		return 0, errors.New("invalid userId")
+	}
+	if tx == nil {
+		tx = DB
+	}
+	var quota int
+	if err := tx.Model(&User{}).Where("id = ?", userId).Select("quota").Find(&quota).Error; err != nil {
+		return 0, err
+	}
+	return quota, nil
+}
+
+func findSubscriptionConversionBatchByRequestIdTx(tx *gorm.DB, requestId string) (*SubscriptionConversionBatch, error) {
+	if tx == nil {
+		tx = DB
+	}
+	var batch SubscriptionConversionBatch
+	if err := tx.Where("request_id = ?", strings.TrimSpace(requestId)).First(&batch).Error; err != nil {
+		return nil, err
+	}
+	return &batch, nil
+}
+
+func listActiveUserSubscriptionsWithPlansTx(tx *gorm.DB, userId int, now int64) ([]activeUserSubscriptionWithPlan, error) {
+	if tx == nil {
+		tx = DB
+	}
+	var subs []UserSubscription
+	if err := tx.Where("user_id = ? AND status = ? AND end_time > ?", userId, SubscriptionStatusActive, now).
+		Order("end_time asc, id asc").
+		Find(&subs).Error; err != nil {
+		return nil, err
+	}
+	if len(subs) == 0 {
+		return []activeUserSubscriptionWithPlan{}, nil
+	}
+
+	planIds := make([]int, 0, len(subs))
+	seenPlanIds := make(map[int]struct{}, len(subs))
+	for _, sub := range subs {
+		if _, ok := seenPlanIds[sub.PlanId]; ok {
+			continue
+		}
+		seenPlanIds[sub.PlanId] = struct{}{}
+		planIds = append(planIds, sub.PlanId)
+	}
+
+	var plans []SubscriptionPlan
+	if err := tx.Where("id IN ?", planIds).Find(&plans).Error; err != nil {
+		return nil, err
+	}
+	planMap := make(map[int]SubscriptionPlan, len(plans))
+	for _, plan := range plans {
+		planMap[plan.Id] = plan
+	}
+
+	result := make([]activeUserSubscriptionWithPlan, 0, len(subs))
+	for _, sub := range subs {
+		plan, ok := planMap[sub.PlanId]
+		if !ok {
+			return nil, fmt.Errorf("subscription plan not found: %d", sub.PlanId)
+		}
+		result = append(result, activeUserSubscriptionWithPlan{
+			Subscription: sub,
+			Plan:         plan,
+		})
+	}
+	return result, nil
+}
+
+func calculateSubscriptionConversionPreviewItem(now int64, sub UserSubscription, plan SubscriptionPlan) (SubscriptionConversionPreviewItem, error) {
+	durationSeconds := sub.EndTime - sub.StartTime
+	if durationSeconds <= 0 {
+		return SubscriptionConversionPreviewItem{}, fmt.Errorf("invalid subscription duration: %d", sub.Id)
+	}
+	remainingSeconds := sub.EndTime - now
+	if remainingSeconds < 0 {
+		remainingSeconds = 0
+	}
+	if remainingSeconds > durationSeconds {
+		remainingSeconds = durationSeconds
+	}
+
+	ratio := decimal.NewFromInt(remainingSeconds).DivRound(decimal.NewFromInt(durationSeconds), 6)
+	if ratio.IsNegative() {
+		ratio = decimal.Zero
+	}
+	if ratio.GreaterThan(decimal.NewFromInt(1)) {
+		ratio = decimal.NewFromInt(1)
+	}
+
+	refundMoney := decimal.NewFromFloat(plan.PriceAmount).Mul(ratio).Round(6)
+	refundQuota := refundMoney.Mul(decimal.NewFromFloat(common.QuotaPerUnit)).Floor().IntPart()
+	if refundQuota < 0 {
+		refundQuota = 0
+	}
+
+	return SubscriptionConversionPreviewItem{
+		UserSubscriptionId: sub.Id,
+		PlanId:             plan.Id,
+		PlanTitle:          plan.Title,
+		PriceAmount:        plan.PriceAmount,
+		Currency:           plan.Currency,
+		StartTime:          sub.StartTime,
+		EndTime:            sub.EndTime,
+		DurationSeconds:    durationSeconds,
+		RemainingSeconds:   remainingSeconds,
+		RefundRatio:        ratio.InexactFloat64(),
+		RefundMoney:        refundMoney.InexactFloat64(),
+		RefundQuota:        refundQuota,
+	}, nil
+}
+
+func buildSubscriptionConversionPreview(userId int, userGroup string, entries []activeUserSubscriptionWithPlan, now int64) (*SubscriptionConversionPreview, error) {
+	items := make([]SubscriptionConversionPreviewItem, 0, len(entries))
+	totalRefundMoney := decimal.Zero
+	var totalRefundQuota int64
+
+	for _, entry := range entries {
+		item, err := calculateSubscriptionConversionPreviewItem(now, entry.Subscription, entry.Plan)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+		totalRefundMoney = totalRefundMoney.Add(decimal.NewFromFloat(item.RefundMoney))
+		totalRefundQuota += item.RefundQuota
+	}
+
+	return &SubscriptionConversionPreview{
+		Items: items,
+		Summary: SubscriptionConversionPreviewSummary{
+			SubscriptionCount: len(items),
+			TotalRefundMoney:  totalRefundMoney.Round(6).InexactFloat64(),
+			TotalRefundQuota:  totalRefundQuota,
+			UserGroupBefore:   userGroup,
+			UserGroupAfter:    "default",
+			CanConvert:        len(items) > 0,
+		},
+	}, nil
+}
+
+func PreviewSubscriptionWalletConversion(userId int) (*SubscriptionConversionPreview, error) {
+	if userId <= 0 {
+		return nil, errors.New("invalid userId")
+	}
+	now := GetDBTimestamp()
+	userGroup, err := getUserGroupByIdTx(nil, userId)
+	if err != nil {
+		return nil, err
+	}
+	entries, err := listActiveUserSubscriptionsWithPlansTx(nil, userId, now)
+	if err != nil {
+		return nil, err
+	}
+	return buildSubscriptionConversionPreview(userId, userGroup, entries, now)
+}
+
+func ExecuteSubscriptionWalletConversion(userId int, requestId string) (*SubscriptionConversionResult, error) {
+	if userId <= 0 {
+		return nil, errors.New("invalid userId")
+	}
+	requestId = strings.TrimSpace(requestId)
+	if requestId == "" {
+		return nil, errors.New("request_id is empty")
+	}
+
+	var result *SubscriptionConversionResult
+	var logMessage string
+
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		if existingBatch, err := findSubscriptionConversionBatchByRequestIdTx(tx, requestId); err == nil {
+			if existingBatch.UserId != userId {
+				return errors.New("request_id already exists")
+			}
+			if existingBatch.Status != "success" {
+				return errors.New("conversion request is processing")
+			}
+			newQuota, quotaErr := getUserQuotaByIdTx(tx, userId)
+			if quotaErr != nil {
+				return quotaErr
+			}
+			result = &SubscriptionConversionResult{
+				BatchId:           existingBatch.Id,
+				SubscriptionCount: existingBatch.SubscriptionCount,
+				TotalRefundMoney:  existingBatch.TotalRefundMoney,
+				TotalRefundQuota:  existingBatch.TotalRefundQuota,
+				UserGroupBefore:   existingBatch.UserGroupBefore,
+				UserGroupAfter:    existingBatch.UserGroupAfter,
+				NewUserQuota:      newQuota,
+			}
+			return nil
+		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return err
+		}
+
+		now := getDBTimestampTx(tx)
+		userGroup, err := getUserGroupByIdTx(tx, userId)
+		if err != nil {
+			return err
+		}
+		entries, err := listActiveUserSubscriptionsWithPlansTx(tx, userId, now)
+		if err != nil {
+			return err
+		}
+		if len(entries) == 0 {
+			return errors.New("no active subscriptions to convert")
+		}
+		preview, err := buildSubscriptionConversionPreview(userId, userGroup, entries, now)
+		if err != nil {
+			return err
+		}
+
+		batch := &SubscriptionConversionBatch{
+			RequestId:         requestId,
+			UserId:            userId,
+			Status:            "pending",
+			SubscriptionCount: preview.Summary.SubscriptionCount,
+			TotalRefundMoney:  preview.Summary.TotalRefundMoney,
+			TotalRefundQuota:  preview.Summary.TotalRefundQuota,
+			UserGroupBefore:   userGroup,
+			UserGroupAfter:    "default",
+		}
+		if err := tx.Create(batch).Error; err != nil {
+			if existingBatch, findErr := findSubscriptionConversionBatchByRequestIdTx(tx, requestId); findErr == nil && existingBatch.Status == "success" {
+				newQuota, quotaErr := getUserQuotaByIdTx(tx, userId)
+				if quotaErr != nil {
+					return quotaErr
+				}
+				result = &SubscriptionConversionResult{
+					BatchId:           existingBatch.Id,
+					SubscriptionCount: existingBatch.SubscriptionCount,
+					TotalRefundMoney:  existingBatch.TotalRefundMoney,
+					TotalRefundQuota:  existingBatch.TotalRefundQuota,
+					UserGroupBefore:   existingBatch.UserGroupBefore,
+					UserGroupAfter:    existingBatch.UserGroupAfter,
+					NewUserQuota:      newQuota,
+				}
+				return nil
+			}
+			return err
+		}
+
+		itemRows := make([]SubscriptionConversionItem, 0, len(preview.Items))
+		subscriptionIds := make([]int, 0, len(preview.Items))
+		for _, item := range preview.Items {
+			itemRows = append(itemRows, SubscriptionConversionItem{
+				BatchId:            batch.Id,
+				UserId:             userId,
+				UserSubscriptionId: item.UserSubscriptionId,
+				PlanId:             item.PlanId,
+				PlanTitle:          item.PlanTitle,
+				PriceAmount:        item.PriceAmount,
+				Currency:           item.Currency,
+				StartTime:          item.StartTime,
+				EndTime:            item.EndTime,
+				DurationSeconds:    item.DurationSeconds,
+				RemainingSeconds:   item.RemainingSeconds,
+				RefundRatio:        item.RefundRatio,
+				RefundMoney:        item.RefundMoney,
+				RefundQuota:        item.RefundQuota,
+			})
+			subscriptionIds = append(subscriptionIds, item.UserSubscriptionId)
+		}
+		if len(itemRows) > 0 {
+			if err := tx.Create(&itemRows).Error; err != nil {
+				return err
+			}
+		}
+
+		res := tx.Model(&UserSubscription{}).
+			Where("user_id = ? AND status = ? AND end_time > ? AND id IN ?", userId, SubscriptionStatusActive, now, subscriptionIds).
+			Updates(map[string]interface{}{
+				"status":              SubscriptionStatusCancelled,
+				"cancel_reason":       SubscriptionCancelReasonWalletConversion,
+				"cancelled_at":        now,
+				"end_time":            now,
+				"conversion_batch_id": batch.Id,
+				"updated_at":          common.GetTimestamp(),
+			})
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected != int64(len(subscriptionIds)) {
+			return errors.New("active subscriptions changed, please retry")
+		}
+
+		userUpdates := map[string]interface{}{
+			"group": "default",
+		}
+		if preview.Summary.TotalRefundQuota > 0 {
+			userUpdates["quota"] = gorm.Expr("quota + ?", preview.Summary.TotalRefundQuota)
+		}
+		if err := tx.Model(&User{}).Where("id = ?", userId).Updates(userUpdates).Error; err != nil {
+			return err
+		}
+
+		if err := tx.Model(batch).Updates(map[string]interface{}{
+			"status":     "success",
+			"updated_at": common.GetTimestamp(),
+		}).Error; err != nil {
+			return err
+		}
+
+		newQuota, err := getUserQuotaByIdTx(tx, userId)
+		if err != nil {
+			return err
+		}
+		result = &SubscriptionConversionResult{
+			BatchId:           batch.Id,
+			SubscriptionCount: preview.Summary.SubscriptionCount,
+			TotalRefundMoney:  preview.Summary.TotalRefundMoney,
+			TotalRefundQuota:  preview.Summary.TotalRefundQuota,
+			UserGroupBefore:   userGroup,
+			UserGroupAfter:    "default",
+			NewUserQuota:      newQuota,
+		}
+		logMessage = fmt.Sprintf("套餐折算并回到余额分组成功，共转换 %d 个有效套餐，返还额度 %s，用户分组从 %s 回退到余额分组(default)",
+			preview.Summary.SubscriptionCount,
+			logger.FormatQuota(int(preview.Summary.TotalRefundQuota)),
+			userGroup,
+		)
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	if result != nil {
+		_ = updateUserQuotaCache(userId, result.NewUserQuota)
+		_ = UpdateUserGroupCache(userId, "default")
+	}
+	if logMessage != "" {
+		RecordLog(userId, LogTypeTopup, logMessage)
+	}
+	return result, nil
 }
 
 // AdminInvalidateUserSubscription marks a user subscription as cancelled and ends it immediately.

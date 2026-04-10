@@ -12,15 +12,48 @@ import (
 )
 
 type TopUp struct {
-	Id               int     `json:"id"`
-	UserId           int     `json:"user_id" gorm:"index"`
-	Amount           int64   `json:"amount"`
-	Money            float64 `json:"money"`
-	TradeNo          string  `json:"trade_no" gorm:"unique;type:varchar(255);index"`
-	PaymentMethod    string  `json:"payment_method" gorm:"type:varchar(50)"`
-	CreateTime       int64   `json:"create_time"`
-	CompleteTime     int64   `json:"complete_time"`
-	Status           string  `json:"status"`
+	Id            int     `json:"id"`
+	UserId        int     `json:"user_id" gorm:"index"`
+	Amount        int64   `json:"amount"`
+	Money         float64 `json:"money"`
+	PaidAmount    float64 `json:"paid_amount" gorm:"type:decimal(12,6);default:0"`
+	PaidCurrency  string  `json:"paid_currency" gorm:"type:varchar(16);default:''"`
+	TradeNo       string  `json:"trade_no" gorm:"unique;type:varchar(255);index"`
+	PaymentMethod string  `json:"payment_method" gorm:"type:varchar(50)"`
+	SourceType    string  `json:"source_type" gorm:"type:varchar(32);default:'wallet_topup';index"`
+	ClientIP      string  `json:"client_ip" gorm:"type:varchar(64);default:''"`
+	UserAgent     string  `json:"user_agent" gorm:"type:text"`
+	InvoiceStatus string  `json:"invoice_status" gorm:"type:varchar(32);default:'none';index"`
+	CreateTime    int64   `json:"create_time"`
+	CompleteTime  int64   `json:"complete_time"`
+	Status        string  `json:"status"`
+}
+
+func (topUp *TopUp) BeforeCreate(tx *gorm.DB) error {
+	if topUp.SourceType == "" {
+		topUp.SourceType = common.TopUpSourceWalletTopUp
+	}
+	if topUp.InvoiceStatus == "" {
+		topUp.InvoiceStatus = common.InvoiceStatusNone
+	}
+	return nil
+}
+
+func (topUp *TopUp) GetEffectivePaidAmount() float64 {
+	if topUp.PaidAmount > 0 {
+		return topUp.PaidAmount
+	}
+	if topUp.Money > 0 {
+		return topUp.Money
+	}
+	return float64(topUp.Amount)
+}
+
+func (topUp *TopUp) GetEffectiveCurrency() string {
+	if topUp.PaidCurrency != "" {
+		return topUp.PaidCurrency
+	}
+	return "CNY"
 }
 
 func (topUp *TopUp) Insert() error {

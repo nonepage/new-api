@@ -45,6 +45,9 @@ import ModelPage from './pages/Model';
 import ModelDeploymentPage from './pages/ModelDeployment';
 import Playground from './pages/Playground';
 import Subscription from './pages/Subscription';
+import Invoice from './pages/Invoice';
+import InvoiceAdmin from './pages/InvoiceAdmin';
+import ReferralAdmin from './pages/ReferralAdmin';
 import OAuth2Callback from './components/auth/OAuth2Callback';
 import PersonalSetting from './components/settings/PersonalSetting';
 import Setup from './pages/Setup';
@@ -275,6 +278,36 @@ function App() {
                 <TopUp />
               </Suspense>
             </PrivateRoute>
+          }
+        />
+        <Route
+          path='/console/invoice'
+          element={
+            <PrivateRoute>
+              <Suspense fallback={<Loading></Loading>} key={location.pathname}>
+                <Invoice />
+              </Suspense>
+            </PrivateRoute>
+          }
+        />
+        <Route
+          path='/console/invoice-admin'
+          element={
+            <AdminRoute>
+              <Suspense fallback={<Loading></Loading>} key={location.pathname}>
+                <InvoiceAdmin />
+              </Suspense>
+            </AdminRoute>
+          }
+        />
+        <Route
+          path='/console/referral-admin'
+          element={
+            <AdminRoute>
+              <Suspense fallback={<Loading></Loading>} key={location.pathname}>
+                <ReferralAdmin />
+              </Suspense>
+            </AdminRoute>
           }
         />
         <Route

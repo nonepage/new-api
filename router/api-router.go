@@ -135,12 +135,47 @@ func SetApiRouter(router *gin.Engine) {
 			}
 		}
 
+		invoiceRoute := apiRouter.Group("/invoice")
+		invoiceRoute.Use(middleware.UserAuth())
+		{
+			invoiceRoute.GET("/profile", controller.GetInvoiceProfiles)
+			invoiceRoute.POST("/profile", controller.SaveInvoiceProfile)
+			invoiceRoute.PUT("/profile/:id", controller.SaveInvoiceProfile)
+			invoiceRoute.DELETE("/profile/:id", controller.DeleteInvoiceProfile)
+			invoiceRoute.GET("/order/self", controller.GetInvoiceAvailableOrders)
+			invoiceRoute.GET("/application/self", controller.GetSelfInvoiceApplications)
+			invoiceRoute.GET("/record/self", controller.GetSelfInvoiceRecords)
+			invoiceRoute.POST("/application", controller.CreateInvoiceApplication)
+			invoiceRoute.POST("/application/:id/cancel", controller.CancelInvoiceApplication)
+		}
+
+		invoiceAdminRoute := apiRouter.Group("/invoice/admin")
+		invoiceAdminRoute.Use(middleware.AdminAuth())
+		{
+			invoiceAdminRoute.GET("/applications", controller.GetAdminInvoiceApplications)
+			invoiceAdminRoute.POST("/applications/:id/approve", controller.ApproveInvoiceApplication)
+			invoiceAdminRoute.POST("/applications/:id/reject", controller.RejectInvoiceApplication)
+			invoiceAdminRoute.GET("/records", controller.GetAdminInvoiceRecords)
+			invoiceAdminRoute.POST("/records", controller.IssueInvoiceRecord)
+			invoiceAdminRoute.POST("/records/:id/void", controller.VoidInvoiceRecord)
+		}
+
+		referralAdminRoute := apiRouter.Group("/referral/admin")
+		referralAdminRoute.Use(middleware.AdminAuth())
+		{
+			referralAdminRoute.GET("/summary", controller.GetReferralAdminSummary)
+			referralAdminRoute.GET("/relations", controller.GetReferralAdminRelations)
+			referralAdminRoute.GET("/relations/:invitee_id", controller.GetReferralAdminDetail)
+		}
+
 		// Subscription billing (plans, purchase, admin management)
 		subscriptionRoute := apiRouter.Group("/subscription")
 		subscriptionRoute.Use(middleware.UserAuth())
 		{
 			subscriptionRoute.GET("/plans", controller.GetSubscriptionPlans)
 			subscriptionRoute.GET("/self", controller.GetSubscriptionSelf)
+			subscriptionRoute.GET("/self/conversion_preview", controller.GetSubscriptionConversionPreview)
+			subscriptionRoute.POST("/self/convert_to_wallet", middleware.CriticalRateLimit(), controller.ConvertSubscriptionToWallet)
 			subscriptionRoute.PUT("/self/preference", controller.UpdateSubscriptionPreference)
 			subscriptionRoute.POST("/epay/pay", middleware.CriticalRateLimit(), controller.SubscriptionRequestEpay)
 			subscriptionRoute.POST("/stripe/pay", middleware.CriticalRateLimit(), controller.SubscriptionRequestStripePay)

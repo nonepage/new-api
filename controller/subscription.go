@@ -7,6 +7,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
+	"github.com/gin-contrib/sessions"
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 )
@@ -19,6 +20,18 @@ type SubscriptionPlanDTO struct {
 
 type BillingPreferenceRequest struct {
 	BillingPreference string `json:"billing_preference"`
+}
+
+type SubscriptionConversionRequest struct {
+	RequestId string `json:"request_id"`
+}
+
+func syncSubscriptionConversionSession(c *gin.Context, group string) error {
+	session := sessions.Default(c)
+	session.Set("group", group)
+	c.Set("group", group)
+	c.Set("user_group", group)
+	return session.Save()
 }
 
 // ---- User APIs ----
@@ -60,6 +73,35 @@ func GetSubscriptionSelf(c *gin.Context) {
 		"subscriptions":      activeSubscriptions, // all active subscriptions
 		"all_subscriptions":  allSubscriptions,    // all subscriptions including expired
 	})
+}
+
+func GetSubscriptionConversionPreview(c *gin.Context) {
+	userId := c.GetInt("id")
+	preview, err := model.PreviewSubscriptionWalletConversion(userId)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, preview)
+}
+
+func ConvertSubscriptionToWallet(c *gin.Context) {
+	userId := c.GetInt("id")
+	var req SubscriptionConversionRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		common.ApiErrorMsg(c, "参数错误")
+		return
+	}
+	result, err := model.ExecuteSubscriptionWalletConversion(userId, req.RequestId)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	if err := syncSubscriptionConversionSession(c, "default"); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, result)
 }
 
 func UpdateSubscriptionPreference(c *gin.Context) {

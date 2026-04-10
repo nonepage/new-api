@@ -85,8 +85,12 @@ func SubscriptionRequestEpay(c *gin.Context) {
 		UserId:        userId,
 		PlanId:        plan.Id,
 		Money:         plan.PriceAmount,
+		PaidAmount:    plan.PriceAmount,
+		PaidCurrency:  plan.Currency,
 		TradeNo:       tradeNo,
 		PaymentMethod: req.PaymentMethod,
+		ClientIP:      c.ClientIP(),
+		UserAgent:     c.Request.UserAgent(),
 		CreateTime:    time.Now().Unix(),
 		Status:        common.TopUpStatusPending,
 	}
