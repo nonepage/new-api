@@ -23,6 +23,7 @@ import {
   Button,
   Card,
   Divider,
+  Modal,
   Select,
   Skeleton,
   Space,
@@ -41,14 +42,12 @@ import {
 
 const { Text } = Typography;
 
-// 过滤易支付方式
 function getEpayMethods(payMethods = []) {
   return (payMethods || []).filter(
     (m) => m?.type && m.type !== 'stripe' && m.type !== 'creem',
   );
 }
 
-// 提交易支付表单
 function submitEpayForm({ url, params }) {
   const form = document.createElement('form');
   form.action = url;
@@ -69,6 +68,13 @@ function submitEpayForm({ url, params }) {
   document.body.removeChild(form);
 }
 
+function buildRequestId() {
+  if (globalThis?.crypto?.randomUUID) {
+    return globalThis.crypto.randomUUID();
+  }
+  return `sub-convert-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
 const SubscriptionPlansCard = ({
   t,
   loading = false,
@@ -82,6 +88,7 @@ const SubscriptionPlansCard = ({
   activeSubscriptions = [],
   allSubscriptions = [],
   reloadSubscriptionSelf,
+  reloadUserQuota,
   withCard = true,
 }) => {
   const [open, setOpen] = useState(false);
@@ -89,6 +96,10 @@ const SubscriptionPlansCard = ({
   const [paying, setPaying] = useState(false);
   const [selectedEpayMethod, setSelectedEpayMethod] = useState('');
   const [refreshing, setRefreshing] = useState(false);
+  const [previewVisible, setPreviewVisible] = useState(false);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [converting, setConverting] = useState(false);
+  const [conversionPreview, setConversionPreview] = useState(null);
 
   const epayMethods = useMemo(() => getEpayMethods(payMethods), [payMethods]);
 
@@ -107,9 +118,57 @@ const SubscriptionPlansCard = ({
   const handleRefresh = async () => {
     setRefreshing(true);
     try {
-      await reloadSubscriptionSelf?.();
+      await Promise.all([reloadSubscriptionSelf?.(), reloadUserQuota?.()]);
     } finally {
       setRefreshing(false);
+    }
+  };
+
+  const openConversionPreview = async () => {
+    setPreviewLoading(true);
+    try {
+      const res = await API.get('/api/subscription/self/conversion_preview');
+      if (res.data?.success) {
+        const preview = res.data?.data;
+        if (!preview?.summary?.can_convert) {
+          showError(t('当前没有可折算的有效套餐'));
+          return;
+        }
+        setConversionPreview(preview);
+        setPreviewVisible(true);
+      } else {
+        showError(res.data?.message || t('加载失败'));
+      }
+    } catch (e) {
+      showError(t('请求失败'));
+    } finally {
+      setPreviewLoading(false);
+    }
+  };
+
+  const handleConvertToWallet = async () => {
+    setConverting(true);
+    try {
+      const res = await API.post('/api/subscription/self/convert_to_wallet', {
+        request_id: buildRequestId(),
+      });
+      if (res.data?.success) {
+        showSuccess(
+          t('套餐折算并回到余额分组完成') +
+            `，${t('返还额度')} ${renderQuota(
+              res.data?.data?.total_refund_quota || 0,
+            )}`,
+        );
+        setPreviewVisible(false);
+        setConversionPreview(null);
+        await Promise.all([reloadSubscriptionSelf?.(), reloadUserQuota?.()]);
+      } else {
+        showError(res.data?.message || t('操作失败'));
+      }
+    } catch (e) {
+      showError(t('请求失败'));
+    } finally {
+      setConverting(false);
     }
   };
 
@@ -198,7 +257,6 @@ const SubscriptionPlansCard = ({
     }
   };
 
-  // 当前订阅信息 - 支持多个订阅
   const hasActiveSubscription = activeSubscriptions.length > 0;
   const hasAnySubscription = allSubscriptions.length > 0;
   const disableSubscriptionPreference = !hasActiveSubscription;
@@ -235,7 +293,6 @@ const SubscriptionPlansCard = ({
   const getPlanPurchaseCount = (planId) =>
     planPurchaseCountMap.get(planId) || 0;
 
-  // 计算单个订阅的剩余天数
   const getRemainingDays = (sub) => {
     if (!sub?.subscription?.end_time) return 0;
     const now = Date.now() / 1000;
@@ -243,7 +300,6 @@ const SubscriptionPlansCard = ({
     return Math.max(0, Math.ceil(remaining / 86400));
   };
 
-  // 计算单个订阅的使用进度
   const getUsagePercent = (sub) => {
     const total = Number(sub?.subscription?.amount_total || 0);
     const used = Number(sub?.subscription?.amount_used || 0);
@@ -251,12 +307,128 @@ const SubscriptionPlansCard = ({
     return Math.round((used / total) * 100);
   };
 
+  const renderSubscriptionStatus = (subscription, isActive, isCancelled) => {
+    if (isActive) {
+      return (
+        <Tag
+          color='white'
+          size='small'
+          shape='circle'
+          prefixIcon={<Badge dot type='success' />}
+        >
+          {t('生效')}
+        </Tag>
+      );
+    }
+    if (isCancelled) {
+      if (subscription?.cancel_reason === 'wallet_conversion') {
+        return (
+          <Tag color='white' size='small' shape='circle'>
+            {t('已折算到余额')}
+          </Tag>
+        );
+      }
+      return (
+        <Tag color='white' size='small' shape='circle'>
+          {t('已作废')}
+        </Tag>
+      );
+    }
+    return (
+      <Tag color='white' size='small' shape='circle'>
+        {t('已过期')}
+      </Tag>
+    );
+  };
+
+  const renderSubscriptionTimeLabel = (subscription, isActive, isCancelled) => {
+    if (isActive) {
+      return t('至');
+    }
+    if (isCancelled && subscription?.cancel_reason === 'wallet_conversion') {
+      return t('折算于');
+    }
+    if (isCancelled) {
+      return t('作废于');
+    }
+    return t('过期于');
+  };
+
+  const getSubscriptionDisplayTime = (subscription) => {
+    if (subscription?.cancel_reason === 'wallet_conversion') {
+      return subscription?.cancelled_at || subscription?.end_time || 0;
+    }
+    return subscription?.end_time || 0;
+  };
+
+  const renderConversionModal = () => (
+    <Modal
+      title={t('确认折算并回到余额分组')}
+      visible={previewVisible}
+      onCancel={() => {
+        if (converting) return;
+        setPreviewVisible(false);
+      }}
+      onOk={handleConvertToWallet}
+      confirmLoading={converting}
+      okText={t('确认折算并回组')}
+      cancelText={t('取消')}
+      centered
+    >
+      <div className='space-y-3'>
+        <div className='text-sm text-gray-600'>
+          {t('执行后将关闭当前所有有效套餐，并把剩余有效期折算成钱包余额。')}
+        </div>
+        <div className='text-sm text-gray-600'>
+          {t('用户分组将恢复为余额分组')}{' '}
+          ({conversionPreview?.summary?.user_group_after || 'default'})
+        </div>
+        <div className='rounded-lg border border-gray-200 p-3 space-y-1 text-sm'>
+          <div>
+            {t('有效套餐数')}：{conversionPreview?.summary?.subscription_count || 0}
+          </div>
+          <div>
+            {t('总返还金额')}：
+            {Number(conversionPreview?.summary?.total_refund_money || 0).toFixed(
+              6,
+            )}
+          </div>
+          <div>
+            {t('总返还额度')}：
+            {renderQuota(conversionPreview?.summary?.total_refund_quota || 0)}
+          </div>
+        </div>
+        <div className='max-h-64 overflow-y-auto rounded-lg border border-gray-200 p-3 space-y-3'>
+          {(conversionPreview?.items || []).map((item) => (
+            <div
+              key={item.user_subscription_id}
+              className='border-b border-gray-100 pb-3 last:border-b-0 last:pb-0'
+            >
+              <div className='font-medium text-sm'>{item.plan_title}</div>
+              <div className='text-xs text-gray-500'>
+                {t('剩余时长')}：{item.remaining_seconds} s
+              </div>
+              <div className='text-xs text-gray-500'>
+                {t('折算比例')}：
+                {(Number(item.refund_ratio || 0) * 100).toFixed(2)}%
+              </div>
+              <div className='text-xs text-gray-500'>
+                {t('返还额度')}：{renderQuota(item.refund_quota || 0)}
+              </div>
+            </div>
+          ))}
+        </div>
+        <div className='text-xs text-red-500'>
+          {t('该操作不可撤销，请确认后再继续。')}
+        </div>
+      </div>
+    </Modal>
+  );
+
   const cardContent = (
     <>
-      {/* 卡片头部 */}
       {loading ? (
         <div className='space-y-4'>
-          {/* 我的订阅骨架屏 */}
           <Card className='!rounded-xl w-full' bodyStyle={{ padding: '12px' }}>
             <div className='flex items-center justify-between mb-3'>
               <Skeleton.Title active style={{ width: 100, height: 20 }} />
@@ -266,7 +438,6 @@ const SubscriptionPlansCard = ({
               <Skeleton.Paragraph active rows={2} />
             </div>
           </Card>
-          {/* 套餐列表骨架屏 */}
           <div className='grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 xl:grid-cols-3 gap-5 w-full px-1'>
             {[1, 2, 3].map((i) => (
               <Card
@@ -301,7 +472,6 @@ const SubscriptionPlansCard = ({
         </div>
       ) : (
         <Space vertical style={{ width: '100%' }} spacing={8}>
-          {/* 当前订阅状态 */}
           <Card className='!rounded-xl w-full' bodyStyle={{ padding: '12px' }}>
             <div className='flex items-center justify-between mb-2 gap-3'>
               <div className='flex items-center gap-2 flex-1 min-w-0'>
@@ -328,6 +498,16 @@ const SubscriptionPlansCard = ({
                 )}
               </div>
               <div className='flex items-center gap-2'>
+                <Button
+                  size='small'
+                  theme='solid'
+                  type='danger'
+                  disabled={!hasActiveSubscription}
+                  loading={previewLoading}
+                  onClick={openConversionPreview}
+                >
+                  {t('一键折算并回到余额分组')}
+                </Button>
                 <Select
                   value={displayBillingPreference}
                   onChange={onChangeBillingPreference}
@@ -399,31 +579,17 @@ const SubscriptionPlansCard = ({
 
                     return (
                       <div key={subscription?.id || subIndex}>
-                        {/* 订阅概要 */}
                         <div className='flex items-center justify-between text-xs mb-2'>
                           <div className='flex items-center gap-2'>
                             <span className='font-medium'>
                               {planTitle
-                                ? `${planTitle} · ${t('订阅')} #${subscription?.id}`
+                                ? `${planTitle} / ${t('订阅')} #${subscription?.id}`
                                 : `${t('订阅')} #${subscription?.id}`}
                             </span>
-                            {isActive ? (
-                              <Tag
-                                color='white'
-                                size='small'
-                                shape='circle'
-                                prefixIcon={<Badge dot type='success' />}
-                              >
-                                {t('生效')}
-                              </Tag>
-                            ) : isCancelled ? (
-                              <Tag color='white' size='small' shape='circle'>
-                                {t('已作废')}
-                              </Tag>
-                            ) : (
-                              <Tag color='white' size='small' shape='circle'>
-                                {t('已过期')}
-                              </Tag>
+                            {renderSubscriptionStatus(
+                              subscription,
+                              isActive,
+                              isCancelled,
                             )}
                           </div>
                           {isActive && (
@@ -433,24 +599,24 @@ const SubscriptionPlansCard = ({
                           )}
                         </div>
                         <div className='text-xs text-gray-500 mb-2'>
-                          {isActive
-                            ? t('至')
-                            : isCancelled
-                              ? t('作废于')
-                              : t('过期于')}{' '}
+                          {renderSubscriptionTimeLabel(
+                            subscription,
+                            isActive,
+                            isCancelled,
+                          )}{' '}
                           {new Date(
-                            (subscription?.end_time || 0) * 1000,
+                            getSubscriptionDisplayTime(subscription) * 1000,
                           ).toLocaleString()}
                         </div>
                         <div className='text-xs text-gray-500 mb-2'>
                           {t('总额度')}:{' '}
                           {totalAmount > 0 ? (
                             <Tooltip
-                              content={`${t('原生额度')}：${usedAmount}/${totalAmount} · ${t('剩余')} ${remainAmount}`}
+                              content={`${t('原生额度')}：${usedAmount}/${totalAmount} / ${t('剩余')} ${remainAmount}`}
                             >
                               <span>
                                 {renderQuota(usedAmount)}/
-                                {renderQuota(totalAmount)} · {t('剩余')}{' '}
+                                {renderQuota(totalAmount)} / {t('剩余')}{' '}
                                 {renderQuota(remainAmount)}
                               </span>
                             </Tooltip>
@@ -476,7 +642,6 @@ const SubscriptionPlansCard = ({
             )}
           </Card>
 
-          {/* 可购买套餐 - 标准定价卡片 */}
           {plans.length > 0 ? (
             <div className='grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 xl:grid-cols-3 gap-5 w-full px-1'>
               {plans.map((p, index) => {
@@ -526,7 +691,6 @@ const SubscriptionPlansCard = ({
                     bodyStyle={{ padding: 0 }}
                   >
                     <div className='p-4 h-full flex flex-col'>
-                      {/* 推荐标签 */}
                       {isPopular && (
                         <div className='mb-2'>
                           <Tag color='purple' shape='circle' size='small'>
@@ -535,7 +699,6 @@ const SubscriptionPlansCard = ({
                           </Tag>
                         </div>
                       )}
-                      {/* 套餐名称 */}
                       <div className='mb-3'>
                         <Typography.Title
                           heading={5}
@@ -556,7 +719,6 @@ const SubscriptionPlansCard = ({
                         )}
                       </div>
 
-                      {/* 价格区域 */}
                       <div className='py-2'>
                         <div className='flex items-baseline justify-start'>
                           <span className='text-xl font-bold text-purple-600'>
@@ -568,7 +730,6 @@ const SubscriptionPlansCard = ({
                         </div>
                       </div>
 
-                      {/* 套餐权益描述 */}
                       <div className='flex flex-col items-start gap-1 pb-2'>
                         {planBenefits.map((item) => {
                           const content = (
@@ -599,8 +760,6 @@ const SubscriptionPlansCard = ({
 
                       <div className='mt-auto'>
                         <Divider margin={12} />
-
-                        {/* 购买按钮 */}
                         {(() => {
                           const count = getPlanPurchaseCount(p?.plan?.id);
                           const reached = limit > 0 && count >= limit;
@@ -652,7 +811,6 @@ const SubscriptionPlansCard = ({
         <div className='space-y-3'>{cardContent}</div>
       )}
 
-      {/* 购买确认弹窗 */}
       <SubscriptionPurchaseModal
         t={t}
         visible={open}
@@ -677,6 +835,8 @@ const SubscriptionPlansCard = ({
         onPayCreem={payCreem}
         onPayEpay={payEpay}
       />
+
+      {renderConversionModal()}
     </>
   );
 };
