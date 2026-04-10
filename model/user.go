@@ -20,41 +20,41 @@ const UserNameMaxLength = 20
 // User if you add sensitive fields, don't forget to clean them in setupLogin function.
 // Otherwise, the sensitive information will be saved on local storage in plain text!
 type User struct {
-	Id                 int            `json:"id"`
-	Username           string         `json:"username" gorm:"unique;index" validate:"max=20"`
-	Password           string         `json:"password" gorm:"not null;" validate:"min=8,max=20"`
-	OriginalPassword   string         `json:"original_password" gorm:"-:all"` // this field is only for Password change verification, don't save it to database!
-	DisplayName        string         `json:"display_name" gorm:"index" validate:"max=20"`
-	Role               int            `json:"role" gorm:"type:int;default:1"`   // admin, common
-	Status             int            `json:"status" gorm:"type:int;default:1"` // enabled, disabled
-	Email              string         `json:"email" gorm:"index" validate:"max=50"`
-	GitHubId           string         `json:"github_id" gorm:"column:github_id;index"`
-	DiscordId          string         `json:"discord_id" gorm:"column:discord_id;index"`
-	OidcId             string         `json:"oidc_id" gorm:"column:oidc_id;index"`
-	WeChatId           string         `json:"wechat_id" gorm:"column:wechat_id;index"`
-	TelegramId         string         `json:"telegram_id" gorm:"column:telegram_id;index"`
-	VerificationCode   string         `json:"verification_code" gorm:"-:all"`                                    // this field is only for Email verification, don't save it to database!
-	AccessToken        *string        `json:"access_token" gorm:"type:char(32);column:access_token;uniqueIndex"` // this token is for system management
-	Quota              int            `json:"quota" gorm:"type:int;default:0"`
-	UsedQuota          int            `json:"used_quota" gorm:"type:int;default:0;column:used_quota"` // used quota
-	RequestCount       int            `json:"request_count" gorm:"type:int;default:0;"`               // request number
-	Group              string         `json:"group" gorm:"type:varchar(64);default:'default'"`
-	AffCode            string         `json:"aff_code" gorm:"type:varchar(32);column:aff_code;uniqueIndex"`
-	AffCount           int            `json:"aff_count" gorm:"type:int;default:0;column:aff_count"`
-	AffQuota           int            `json:"aff_quota" gorm:"type:int;default:0;column:aff_quota"`
-	AffHistoryQuota    int            `json:"aff_history_quota" gorm:"type:int;default:0;column:aff_history"`
-	InviterId          int            `json:"inviter_id" gorm:"type:int;column:inviter_id;index"`
-	RegisterIP         string         `json:"register_ip" gorm:"type:varchar(64);column:register_ip"`
-	RegisterUserAgent  string         `json:"register_user_agent" gorm:"type:text;column:register_user_agent"`
-	LastLoginIP        string         `json:"last_login_ip" gorm:"type:varchar(64);column:last_login_ip"`
-	LastLoginUserAgent string         `json:"last_login_user_agent" gorm:"type:text;column:last_login_user_agent"`
-	LastLoginAt        int64          `json:"last_login_at" gorm:"type:bigint;column:last_login_at;default:0"`
-	DeletedAt          gorm.DeletedAt `gorm:"index"`
-	ReferralCommissionPercent *float64 `json:"referral_commission_percent" gorm:"type:decimal(5,2);column:referral_commission_percent"`
-	LinuxDOId          string         `json:"linux_do_id" gorm:"column:linux_do_id;index"`
-	Setting            string         `json:"setting" gorm:"type:text;column:setting"`
-	Remark             string         `json:"remark,omitempty" gorm:"type:varchar(255)" validate:"max=255"`
-	StripeCustomer     string         `json:"stripe_customer" gorm:"type:varchar(64);column:stripe_customer;index"`
+	Id                        int            `json:"id"`
+	Username                  string         `json:"username" gorm:"unique;index" validate:"max=20"`
+	Password                  string         `json:"password" gorm:"not null;" validate:"min=8,max=20"`
+	OriginalPassword          string         `json:"original_password" gorm:"-:all"` // this field is only for Password change verification, don't save it to database!
+	DisplayName               string         `json:"display_name" gorm:"index" validate:"max=20"`
+	Role                      int            `json:"role" gorm:"type:int;default:1"`   // admin, common
+	Status                    int            `json:"status" gorm:"type:int;default:1"` // enabled, disabled
+	Email                     string         `json:"email" gorm:"index" validate:"max=50"`
+	GitHubId                  string         `json:"github_id" gorm:"column:github_id;index"`
+	DiscordId                 string         `json:"discord_id" gorm:"column:discord_id;index"`
+	OidcId                    string         `json:"oidc_id" gorm:"column:oidc_id;index"`
+	WeChatId                  string         `json:"wechat_id" gorm:"column:wechat_id;index"`
+	TelegramId                string         `json:"telegram_id" gorm:"column:telegram_id;index"`
+	VerificationCode          string         `json:"verification_code" gorm:"-:all"`                                    // this field is only for Email verification, don't save it to database!
+	AccessToken               *string        `json:"access_token" gorm:"type:char(32);column:access_token;uniqueIndex"` // this token is for system management
+	Quota                     int            `json:"quota" gorm:"type:int;default:0"`
+	UsedQuota                 int            `json:"used_quota" gorm:"type:int;default:0;column:used_quota"` // used quota
+	RequestCount              int            `json:"request_count" gorm:"type:int;default:0;"`               // request number
+	Group                     string         `json:"group" gorm:"type:varchar(64);default:'default'"`
+	AffCode                   string         `json:"aff_code" gorm:"type:varchar(32);column:aff_code;uniqueIndex"`
+	AffCount                  int            `json:"aff_count" gorm:"type:int;default:0;column:aff_count"`
+	AffQuota                  int            `json:"aff_quota" gorm:"type:int;default:0;column:aff_quota"`
+	AffHistoryQuota           int            `json:"aff_history_quota" gorm:"type:int;default:0;column:aff_history"`
+	InviterId                 int            `json:"inviter_id" gorm:"type:int;column:inviter_id;index"`
+	RegisterIP                string         `json:"register_ip" gorm:"type:varchar(64);column:register_ip"`
+	RegisterUserAgent         string         `json:"register_user_agent" gorm:"type:text;column:register_user_agent"`
+	LastLoginIP               string         `json:"last_login_ip" gorm:"type:varchar(64);column:last_login_ip"`
+	LastLoginUserAgent        string         `json:"last_login_user_agent" gorm:"type:text;column:last_login_user_agent"`
+	LastLoginAt               int64          `json:"last_login_at" gorm:"type:bigint;column:last_login_at;default:0"`
+	DeletedAt                 gorm.DeletedAt `gorm:"index"`
+	ReferralCommissionPercent *float64       `json:"referral_commission_percent" gorm:"type:decimal(5,2);column:referral_commission_percent"`
+	LinuxDOId                 string         `json:"linux_do_id" gorm:"column:linux_do_id;index"`
+	Setting                   string         `json:"setting" gorm:"type:text;column:setting"`
+	Remark                    string         `json:"remark,omitempty" gorm:"type:varchar(255)" validate:"max=255"`
+	StripeCustomer            string         `json:"stripe_customer" gorm:"type:varchar(64);column:stripe_customer;index"`
 }
 
 func (user *User) ToBaseUser() *UserBase {
@@ -342,6 +342,86 @@ func inviteUser(inviterId int) (err error) {
 	user.AffQuota += common.QuotaForInviter
 	user.AffHistoryQuota += common.QuotaForInviter
 	return DB.Save(user).Error
+}
+
+func CreditReferralCommission(userId int, rechargeAmount float64, paymentMethod string, topUpId int) error {
+	if !common.ReferralCommissionEnabled || rechargeAmount <= 0 {
+		return nil
+	}
+
+	user, err := GetUserById(userId, true)
+	if err != nil || user.InviterId == 0 {
+		return err
+	}
+
+	inviter, err := GetUserById(user.InviterId, true)
+	if err != nil {
+		return err
+	}
+
+	rate := common.ReferralCommissionPercent
+	if inviter.ReferralCommissionPercent != nil {
+		rate = *inviter.ReferralCommissionPercent
+	}
+	if rate <= 0 || rate > 100 {
+		return nil
+	}
+
+	commission := int(rechargeAmount * (rate / 100) * common.QuotaPerUnit)
+	if commission <= 0 {
+		return nil
+	}
+
+	credited := false
+	err = DB.Transaction(func(tx *gorm.DB) error {
+		if common.ReferralCommissionMaxRecharges > 0 {
+			var count int64
+			if err := tx.Model(&ReferralCommission{}).Where("invitee_id = ?", userId).Count(&count).Error; err != nil {
+				return err
+			}
+			if int(count) >= common.ReferralCommissionMaxRecharges {
+				return nil
+			}
+		}
+
+		var existing int64
+		if err := tx.Model(&ReferralCommission{}).Where("invitee_id = ? AND top_up_id = ? AND payment_method = ?", userId, topUpId, paymentMethod).Count(&existing).Error; err != nil {
+			return err
+		}
+		if existing > 0 {
+			return nil
+		}
+
+		if err := tx.Create(&ReferralCommission{
+			InviterId:       user.InviterId,
+			InviteeId:       userId,
+			TopUpId:         topUpId,
+			RechargeAmount:  rechargeAmount,
+			CommissionQuota: commission,
+			CommissionRate:  rate,
+			PaymentMethod:   paymentMethod,
+		}).Error; err != nil {
+			return err
+		}
+
+		if err := tx.Model(&User{}).Where("id = ?", user.InviterId).Updates(map[string]interface{}{
+			"aff_quota":   gorm.Expr("aff_quota + ?", commission),
+			"aff_history": gorm.Expr("aff_history + ?", commission),
+		}).Error; err != nil {
+			return err
+		}
+
+		credited = true
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+
+	if credited {
+		RecordLog(user.InviterId, LogTypeSystem, fmt.Sprintf("邀请用户充值返佣 %s (%.1f%% of $%.2f)", logger.LogQuota(commission), rate, rechargeAmount))
+	}
+	return nil
 }
 
 func (user *User) TransferAffQuotaToQuota(quota int) error {

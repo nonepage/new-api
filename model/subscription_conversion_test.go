@@ -21,8 +21,6 @@ func prepareSubscriptionConversionTest(t *testing.T) {
 			name  string
 			model any
 		}{
-			{name: "User", model: &User{}},
-			{name: "Log", model: &Log{}},
 			{name: "SubscriptionPlan", model: &SubscriptionPlan{}},
 			{name: "SubscriptionOrder", model: &SubscriptionOrder{}},
 			{name: "UserSubscription", model: &UserSubscription{}},
