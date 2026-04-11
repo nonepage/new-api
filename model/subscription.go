@@ -1042,10 +1042,10 @@ func getSubscriptionRefundBase(sub UserSubscription, plan SubscriptionPlan) (flo
 	if sub.PurchasePriceAmount > 0 || sub.PurchaseCurrency != "" {
 		return sub.PurchasePriceAmount, strings.TrimSpace(sub.PurchaseCurrency)
 	}
-	if sub.Source == "order" {
-		return plan.PriceAmount, strings.TrimSpace(plan.Currency)
+	if sub.Source == "admin" {
+		return 0, strings.TrimSpace(plan.Currency)
 	}
-	return 0, strings.TrimSpace(plan.Currency)
+	return plan.PriceAmount, strings.TrimSpace(plan.Currency)
 }
 
 func calculateSubscriptionConversionPreviewItem(now int64, sub UserSubscription, plan SubscriptionPlan) (SubscriptionConversionPreviewItem, error) {

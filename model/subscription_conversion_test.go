@@ -249,6 +249,40 @@ func TestPreviewSubscriptionWalletConversion_UsesPurchaseSnapshotWhenPlanPriceCh
 	assert.InDelta(t, 5.0, item.RefundMoney, 0.2)
 }
 
+func TestPreviewSubscriptionWalletConversion_FallsBackToCurrentPlanPriceWithoutSnapshot(t *testing.T) {
+	prepareSubscriptionConversionTest(t)
+
+	user := createSubscriptionConversionUser(t, "vip", 1000)
+	now := GetDBTimestamp()
+	plan := createSubscriptionConversionPlan(t, "Legacy Monthly", 10, "vip")
+	createUserSubscriptionForConversionTestWithSource(
+		t,
+		user.Id,
+		plan.Id,
+		now-1000,
+		now+1000,
+		SubscriptionStatusActive,
+		"",
+		0,
+		"",
+	)
+	require.NoError(t, DB.Model(&SubscriptionPlan{}).Where("id = ?", plan.Id).Updates(map[string]interface{}{
+		"price_amount": 40,
+		"currency":     "USD",
+	}).Error)
+
+	preview, err := PreviewSubscriptionWalletConversion(user.Id)
+	require.NoError(t, err)
+	require.NotNil(t, preview)
+	require.Len(t, preview.Items, 1)
+
+	item := preview.Items[0]
+	assert.Equal(t, 40.0, item.PriceAmount)
+	assert.Equal(t, "USD", item.Currency)
+	assert.InDelta(t, 20.0, item.RefundMoney, 0.5)
+	assert.Positive(t, item.RefundQuota)
+}
+
 func TestExecuteSubscriptionWalletConversion_AdminSubscriptionDoesNotRefund(t *testing.T) {
 	prepareSubscriptionConversionTest(t)
 
