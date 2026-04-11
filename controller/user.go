@@ -58,7 +58,7 @@ func Login(c *gin.Context) {
 		return
 	}
 
-	// 妫€鏌ユ槸鍚﹀惎鐢?FA
+	// 检查是否启用2FA
 	if model.IsTwoFAEnabled(user.Id) {
 		// 璁剧疆pending session锛岀瓑寰?FA楠岃瘉
 		session := sessions.Default(c)
@@ -188,13 +188,13 @@ func Register(c *gin.Context) {
 		return
 	}
 
-	// 鑾峰彇鎻掑叆鍚庣殑鐢ㄦ埛ID
+	// 获取插入后的用户ID
 	var insertedUser model.User
 	if err := model.DB.Where("username = ?", cleanUser.Username).First(&insertedUser).Error; err != nil {
 		common.ApiErrorI18n(c, i18n.MsgUserRegisterFailed)
 		return
 	}
-	// 鐢熸垚榛樿浠ょ墝
+	// 生成默认令牌
 	if constant.GenerateDefaultToken {
 		key, err := common.GenerateKey()
 		if err != nil {
@@ -202,9 +202,9 @@ func Register(c *gin.Context) {
 			common.SysLog("failed to generate token key: " + err.Error())
 			return
 		}
-		// 鐢熸垚榛樿浠ょ墝
+		// 生成默认令牌
 		token := model.Token{
-			UserId:             insertedUser.Id, // 浣跨敤鎻掑叆鍚庣殑鐢ㄦ埛ID
+			UserId:             insertedUser.Id, // 使用插入后的用户ID
 			Name:               cleanUser.Username + " initial token",
 			Key:                key,
 			CreatedTime:        common.GetTimestamp(),
@@ -406,13 +406,13 @@ func GetSelf(c *gin.Context) {
 	// Hide admin remarks: set to empty to trigger omitempty tag, ensuring the remark field is not included in JSON returned to regular users
 	user.Remark = ""
 
-	// 璁＄畻鐢ㄦ埛鏉冮檺淇℃伅
+	// 计算用户权限信息
 	permissions := calculateUserPermissions(userRole)
 
-	// 鑾峰彇鐢ㄦ埛璁剧疆骞舵彁鍙杝idebar_modules
+	// 获取用户设置并提取sidebar_modules
 	userSetting := user.GetSetting()
 
-	// 鏋勫缓鍝嶅簲鏁版嵁锛屽寘鍚敤鎴蜂俊鎭拰鏉冮檺
+	// 构建响应数据，包含用户信息和权限
 	responseData := map[string]interface{}{
 		"id":                           user.Id,
 		"username":                     user.Username,
@@ -440,7 +440,7 @@ func GetSelf(c *gin.Context) {
 		"setting":                      user.Setting,
 		"stripe_customer":              user.StripeCustomer,
 		"sidebar_modules":              userSetting.SidebarModules, // 姝ｇ‘鎻愬彇sidebar_modules瀛楁
-		"permissions":                  permissions,                // 鏂板鏉冮檺瀛楁
+		"permissions":                  permissions,                // 新增权限字段
 	}
 
 	c.JSON(http.StatusOK, gin.H{
@@ -662,7 +662,7 @@ func UpdateSelf(c *gin.Context) {
 		return
 	}
 
-	// 妫€鏌ユ槸鍚︽槸鐢ㄦ埛璁剧疆鏇存柊璇锋眰 (sidebar_modules 鎴?language)
+	// 检查是否是用户设置更新请求 (sidebar_modules 或 language)
 	if sidebarModules, sidebarExists := requestData["sidebar_modules"]; sidebarExists {
 		userId := c.GetInt("id")
 		user, err := model.GetUserById(userId, false)
@@ -671,15 +671,15 @@ func UpdateSelf(c *gin.Context) {
 			return
 		}
 
-		// 鑾峰彇褰撳墠鐢ㄦ埛璁剧疆
+		// 获取当前用户设置
 		currentSetting := user.GetSetting()
 
-		// 鏇存柊sidebar_modules瀛楁
+		// 更新sidebar_modules字段
 		if sidebarModulesStr, ok := sidebarModules.(string); ok {
 			currentSetting.SidebarModules = sidebarModulesStr
 		}
 
-		// 淇濆瓨鏇存柊鍚庣殑璁剧疆
+		// 保存更新后的设置
 		user.SetSetting(currentSetting)
 		if err := user.Update(false); err != nil {
 			common.ApiErrorI18n(c, i18n.MsgUpdateFailed)
@@ -690,7 +690,7 @@ func UpdateSelf(c *gin.Context) {
 		return
 	}
 
-	// 妫€鏌ユ槸鍚︽槸璇█鍋忓ソ鏇存柊璇锋眰
+	// 检查是否是语言偏好更新请求
 	if language, langExists := requestData["language"]; langExists {
 		userId := c.GetInt("id")
 		user, err := model.GetUserById(userId, false)
@@ -699,15 +699,15 @@ func UpdateSelf(c *gin.Context) {
 			return
 		}
 
-		// 鑾峰彇褰撳墠鐢ㄦ埛璁剧疆
+		// 获取当前用户设置
 		currentSetting := user.GetSetting()
 
-		// 鏇存柊language瀛楁
+		// 更新language字段
 		if langStr, ok := language.(string); ok {
 			currentSetting.Language = langStr
 		}
 
-		// 淇濆瓨鏇存柊鍚庣殑璁剧疆
+		// 保存更新后的设置
 		user.SetSetting(currentSetting)
 		if err := user.Update(false); err != nil {
 			common.ApiErrorI18n(c, i18n.MsgUpdateFailed)
@@ -773,7 +773,7 @@ func checkUpdatePassword(originalPassword string, newPassword string, userId int
 		return
 	}
 
-	// 瀵嗙爜涓嶄负绌?闇€瑕侀獙璇佸師瀵嗙爜
+	// 密码不为空，需要验证原密码
 	// 鏀寔绗竴娆¤处鍙风粦瀹氭椂鍘熷瘑鐮佷负绌虹殑鎯呭喌
 	if !common.ValidatePasswordAndHash(originalPassword, currentUser.Password) && currentUser.Password != "" {
 		err = fmt.Errorf("original password is incorrect")
@@ -1132,7 +1132,7 @@ func UpdateUserSetting(c *gin.Context) {
 		}
 	}
 
-	// 濡傛灉鏄疊ark绫诲瀷锛岄獙璇丅ark URL
+	// 如果是Bark类型，验证Bark URL
 	if req.QuotaWarningType == dto.NotifyTypeBark {
 		if req.BarkUrl == "" {
 			common.ApiErrorI18n(c, i18n.MsgSettingBarkUrlEmpty)
@@ -1143,14 +1143,14 @@ func UpdateUserSetting(c *gin.Context) {
 			common.ApiErrorI18n(c, i18n.MsgSettingBarkUrlInvalid)
 			return
 		}
-		// 妫€鏌ユ槸鍚︽槸HTTP鎴朒TTPS
+		// 检查是否是HTTP或HTTPS
 		if !strings.HasPrefix(req.BarkUrl, "https://") && !strings.HasPrefix(req.BarkUrl, "http://") {
 			common.ApiErrorI18n(c, i18n.MsgSettingUrlMustHttp)
 			return
 		}
 	}
 
-	// 濡傛灉鏄疓otify绫诲瀷锛岄獙璇丟otify URL鍜孴oken
+	// 如果是Gotify类型，验证Gotify URL和Token
 	if req.QuotaWarningType == dto.NotifyTypeGotify {
 		if req.GotifyUrl == "" {
 			common.ApiErrorI18n(c, i18n.MsgSettingGotifyUrlEmpty)
@@ -1165,7 +1165,7 @@ func UpdateUserSetting(c *gin.Context) {
 			common.ApiErrorI18n(c, i18n.MsgSettingGotifyUrlInvalid)
 			return
 		}
-		// 妫€鏌ユ槸鍚︽槸HTTP鎴朒TTPS
+		// 检查是否是HTTP或HTTPS
 		if !strings.HasPrefix(req.GotifyUrl, "https://") && !strings.HasPrefix(req.GotifyUrl, "http://") {
 			common.ApiErrorI18n(c, i18n.MsgSettingUrlMustHttp)
 			return
@@ -1184,7 +1184,7 @@ func UpdateUserSetting(c *gin.Context) {
 		upstreamModelUpdateNotifyEnabled = *req.UpstreamModelUpdateNotifyEnabled
 	}
 
-	// 鏋勫缓璁剧疆
+	// 构建设置
 	settings := dto.UserSetting{
 		NotifyType:                       req.QuotaWarningType,
 		QuotaWarningThreshold:            req.QuotaWarningThreshold,
@@ -1214,7 +1214,7 @@ func UpdateUserSetting(c *gin.Context) {
 	if req.QuotaWarningType == dto.NotifyTypeGotify {
 		settings.GotifyUrl = req.GotifyUrl
 		settings.GotifyToken = req.GotifyToken
-		// Gotify浼樺厛绾ц寖鍥?-10锛岃秴鍑鸿寖鍥村垯浣跨敤榛樿鍊?
+		// Gotify优先级范围0-10，超出范围则使用默认值5
 		if req.GotifyPriority < 0 || req.GotifyPriority > 10 {
 			settings.GotifyPriority = 5
 		} else {
@@ -1222,7 +1222,7 @@ func UpdateUserSetting(c *gin.Context) {
 		}
 	}
 
-	// 鏇存柊鐢ㄦ埛璁剧疆
+	// 更新用户设置
 	user.SetSetting(settings)
 	if err := user.Update(false); err != nil {
 		common.ApiErrorI18n(c, i18n.MsgUpdateFailed)

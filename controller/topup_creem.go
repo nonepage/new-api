@@ -26,7 +26,7 @@ const (
 
 var creemAdaptor = &CreemAdaptor{}
 
-// 鐢熸垚HMAC-SHA256绛惧悕
+// generateCreemSignature 生成HMAC-SHA256签名
 func generateCreemSignature(payload string, secret string) string {
 	h := hmac.New(sha256.New, []byte(secret))
 	h.Write([]byte(payload))
@@ -142,7 +142,7 @@ func (*CreemAdaptor) RequestPay(c *gin.Context, req *CreemPayRequest) {
 func RequestCreemPay(c *gin.Context) {
 	var req CreemPayRequest
 
-	// 璇诲彇body鍐呭鐢ㄤ簬鎵撳嵃锛屽悓鏃朵繚鐣欏師濮嬫暟鎹緵鍚庣画浣跨敤
+	// 读取body内容用于打印，同时保留原始数据供后续使用
 	bodyBytes, err := io.ReadAll(c.Request.Body)
 	if err != nil {
 		log.Printf("read creem pay req body err: %v", err)
@@ -226,10 +226,10 @@ type CreemWebhookEvent struct {
 }
 
 func CreemWebhook(c *gin.Context) {
-	// 璇诲彇body鍐呭鐢ㄤ簬鎵撳嵃锛屽悓鏃朵繚鐣欏師濮嬫暟鎹緵鍚庣画浣跨敤
+	// 读取body内容用于打印，同时保留原始数据供后续使用
 	bodyBytes, err := io.ReadAll(c.Request.Body)
 	if err != nil {
-		log.Printf("璇诲彇Creem Webhook璇锋眰body澶辫触: %v", err)
+		log.Printf("failed to read Creem webhook request body: %v", err)
 		c.AbortWithStatus(http.StatusBadRequest)
 		return
 	}
@@ -257,7 +257,7 @@ func CreemWebhook(c *gin.Context) {
 	// 閲嶆柊璁剧疆body渚涘悗缁殑ShouldBindJSON浣跨敤
 	c.Request.Body = io.NopCloser(bytes.NewReader(bodyBytes))
 
-	// 瑙ｆ瀽鏂版牸寮忕殑webhook鏁版嵁
+	// 解析webhook数据
 	var webhookEvent CreemWebhookEvent
 	if err := c.ShouldBindJSON(&webhookEvent); err != nil {
 		log.Printf("parse Creem webhook payload err: %v", err)

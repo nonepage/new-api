@@ -16,15 +16,19 @@ func parseUserSetting(raw string) dto.UserSetting {
 		return setting
 	}
 
+	var rawMap map[string]interface{}
+	if err := common.UnmarshalJsonStr(raw, &rawMap); err != nil {
+		common.SysLog("failed to unmarshal setting: " + err.Error())
+		return setting
+	}
+
 	if err := common.UnmarshalJsonStr(raw, &setting); err != nil {
 		common.SysLog("failed to unmarshal setting: " + err.Error())
 		return setting
 	}
 
-	var rawMap map[string]interface{}
-	if err := common.UnmarshalJsonStr(raw, &rawMap); err != nil {
-		return setting
-	}
+	// If record_ip_log was not explicitly set in the stored JSON,
+	// keep the default (true) regardless of what Unmarshal produced.
 	if _, ok := rawMap["record_ip_log"]; !ok {
 		setting.RecordIpLog = true
 	}

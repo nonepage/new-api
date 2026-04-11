@@ -1199,7 +1199,7 @@ func ExecuteSubscriptionWalletConversion(userId int, requestId string) (*Subscri
 			UserGroupAfter:    defaultUserGroup,
 			NewUserQuota:      newQuota,
 		}
-		logMessage = fmt.Sprintf("????????????????? %d ?????????? %s?????? %s ???????(%s)",
+		logMessage = fmt.Sprintf("套餐转余额成功，共转换 %d 个有效套餐，返还额度 %s，用户分组从 %s 回退到 %s",
 			preview.Summary.SubscriptionCount,
 			logger.FormatQuota(int(preview.Summary.TotalRefundQuota)),
 			userGroup,

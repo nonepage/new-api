@@ -99,14 +99,14 @@ func (user *User) SetSetting(setting dto.UserSetting) {
 func generateDefaultSidebarConfigForRole(userRole int) string {
 	defaultConfig := map[string]interface{}{}
 
-	// ???????????????
+	// 聊天区域 - 所有用户都可以访问
 	defaultConfig["chat"] = map[string]interface{}{
 		"enabled":    true,
 		"playground": true,
 		"chat":       true,
 	}
 
-	// ????????????????
+	// 控制台区域 - 所有用户都可以访问
 	defaultConfig["console"] = map[string]interface{}{
 		"enabled":    true,
 		"detail":     true,
@@ -116,7 +116,7 @@ func generateDefaultSidebarConfigForRole(userRole int) string {
 		"task":       true,
 	}
 
-	// ?????????????????
+	// 个人中心区域 - 所有用户都可以访问
 	defaultConfig["personal"] = map[string]interface{}{
 		"enabled":  true,
 		"topup":    true,
@@ -138,7 +138,7 @@ func generateDefaultSidebarConfigForRole(userRole int) string {
 			"setting":      false,
 		}
 	} else if userRole == common.RoleRootUser {
-		// ???????????root ???????????
+		// 超级管理员可以访问所有功能
 		defaultConfig["admin"] = map[string]interface{}{
 			"enabled":      true,
 			"channel":      true,
@@ -243,10 +243,10 @@ func SearchUsers(keyword string, group string, startIdx int, num int) ([]*User, 
 
 	query := tx.Unscoped().Model(&User{})
 
-	// 閺嬪嫬缂撻幖婊呭偍閺夆€叉
+	// 构建搜索条件
 	likeCondition := "username LIKE ? OR email LIKE ? OR display_name LIKE ?"
 
-	// 鐏忔繆鐦亸鍡楀彠闁款喖鐡ф潪顒佸床娑撶儤鏆ｉ弫鐧怐
+	// 尝试将关键字转换为整数ID
 	keywordInt, err := strconv.Atoi(keyword)
 	if err == nil {
 		likeCondition = "id = ? OR " + likeCondition
@@ -267,21 +267,21 @@ func SearchUsers(keyword string, group string, startIdx int, num int) ([]*User, 
 		}
 	}
 
-	// 閼惧嘲褰囬幀缁樻殶
+	// 获取总数
 	err = query.Count(&total).Error
 	if err != nil {
 		tx.Rollback()
 		return nil, 0, err
 	}
 
-	// 閼惧嘲褰囬崚鍡涖€夐弫鐗堝祦
+	// 获取分页数据
 	err = query.Omit(publicUserOmitFields()...).Order("id desc").Limit(num).Offset(startIdx).Find(&users).Error
 	if err != nil {
 		tx.Rollback()
 		return nil, 0, err
 	}
 
-	// 閹绘劒姘︽禍瀣
+	// 提交事务
 	if err = tx.Commit().Error; err != nil {
 		return nil, 0, err
 	}
@@ -428,13 +428,13 @@ func (user *User) TransferAffQuotaToQuota(quota int) error {
 	if tx.Error != nil {
 		return tx.Error
 	}
-	defer tx.Rollback() // 绾喕绻氶崷銊ュ毐閺佷即鈧偓閸戠儤妞傛禍瀣閼宠棄娲栧?
+	defer tx.Rollback() // 确保在函数退出时事务能回滚
 	err := withRowLock(tx).First(&user, user.Id).Error
 	if err != nil {
 		return err
 	}
 
-	// 閸愬秵顐煎Λ鈧弻銉ф暏閹撮娈慉ffQuota閺勵垰鎯佺搾鍐差檮
+	// 再次检查用户的AffQuota是否足够
 	if user.AffQuota < quota {
 		return errors.New("insufficient affiliate quota")
 	}
@@ -446,7 +446,7 @@ func (user *User) TransferAffQuotaToQuota(quota int) error {
 		return err
 	}
 
-	// 閹绘劒姘︽禍瀣
+	// 提交事务
 	return tx.Commit().Error
 }
 
@@ -584,9 +584,10 @@ func (user *User) Update(updatePassword bool) error {
 		return err
 	}
 	var refreshed User
-	if err = DB.Omit("password").First(&refreshed, user.Id).Error; err != nil {
+	if err = DB.First(&refreshed, user.Id).Error; err != nil {
 		return err
 	}
+	refreshed.Password = ""
 	*user = refreshed
 
 	// Update cache
@@ -632,9 +633,10 @@ func (user *User) Edit(updatePassword bool) error {
 		return err
 	}
 	var refreshed User
-	if err = DB.Omit("password").First(&refreshed, user.Id).Error; err != nil {
+	if err = DB.First(&refreshed, user.Id).Error; err != nil {
 		return err
 	}
+	refreshed.Password = ""
 	*user = refreshed
 
 	// Update cache
@@ -680,7 +682,7 @@ func (user *User) Delete() error {
 		return err
 	}
 
-	// 濞撳懘娅庣紓鎾崇摠
+	// 清除缓存
 	return invalidateUserCache(user.Id)
 }
 
@@ -1065,7 +1067,7 @@ func updateUserUsedQuotaAndRequestCount(id int, quota int, count int) {
 		return
 	}
 
-	//// 閺囧瓨鏌婄紓鎾崇摠
+	//// 更新缓存
 	//if err := invalidateUserCache(id); err != nil {
 	//	common.SysError("failed to invalidate user cache: " + err.Error())
 	//}

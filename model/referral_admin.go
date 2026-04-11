@@ -275,13 +275,11 @@ func listReferralInvitees(baseQuery *gorm.DB, keyword string, pageInfo *common.P
 			Pluck("id", &inviterIDs).Error; err != nil {
 			return nil, 0, err
 		}
-		searchQuery := query.Where(
-			DB.Where("username LIKE ? OR display_name LIKE ? OR email LIKE ?", like, like, like),
-		)
+		searchCond := DB.Where("username LIKE ? OR display_name LIKE ? OR email LIKE ?", like, like, like)
 		if len(inviterIDs) > 0 {
-			searchQuery = searchQuery.Or("inviter_id IN ?", inviterIDs)
+			searchCond = searchCond.Or("inviter_id IN ?", inviterIDs)
 		}
-		query = searchQuery
+		query = query.Where(searchCond)
 	}
 
 	var total int64

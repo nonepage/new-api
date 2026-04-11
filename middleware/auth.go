@@ -218,7 +218,7 @@ func TokenOrUserAuth() func(c *gin.Context) {
 	}
 }
 
-// TokenAuthReadOnly 瀹芥澗鐗堟湰鐨勪护鐗岃璇佷腑闂翠欢锛岀敤浜庡彧璇绘煡璇㈡帴鍙ｃ€?// 鍙獙璇佷护鐗?key 鏄惁瀛樺湪锛屼笉妫€鏌ヤ护鐗岀姸鎬併€佽繃鏈熸椂闂村拰棰濆害銆?// 鍗充娇浠ょ墝宸茶繃鏈熴€佸凡鑰楀敖鎴栧凡绂佺敤锛屼篃鍏佽璁块棶銆?// 浠嶇劧妫€鏌ョ敤鎴锋槸鍚﹁灏佺銆?
+// TokenAuthReadOnly 宽松版本的令牌认证中间件，用于只读查询接口。只验证令牌 key 是否存在，不检查令牌状态、过期时间和额度。即使令牌已过期、已耗尽或已禁用，也允许访问。仍然检查用户是否被封禁。
 func TokenAuthReadOnly() func(c *gin.Context) {
 	return func(c *gin.Context) {
 		key := c.Request.Header.Get("Authorization")
@@ -274,7 +274,7 @@ func TokenAuthReadOnly() func(c *gin.Context) {
 
 func TokenAuth() func(c *gin.Context) {
 	return func(c *gin.Context) {
-		// 鍏堟娴嬫槸鍚︿负ws
+		// 先检测是否为ws
 		if c.Request.Header.Get("Sec-WebSocket-Protocol") != "" {
 			// Sec-WebSocket-Protocol: realtime, openai-insecure-api-key.sk-xxx, openai-beta.realtime-v1
 			// read sk from Sec-WebSocket-Protocol
@@ -289,7 +289,7 @@ func TokenAuth() func(c *gin.Context) {
 			}
 			c.Request.Header.Set("Authorization", "Bearer "+key)
 		}
-		// 妫€鏌ath鍖呭惈/v1/messages 鎴?/v1/models
+		// 检查path包含/v1/messages 或 /v1/models
 		if strings.Contains(c.Request.URL.Path, "/v1/messages") || strings.Contains(c.Request.URL.Path, "/v1/models") {
 			anthropicKey := c.Request.Header.Get("x-api-key")
 			if anthropicKey != "" {
