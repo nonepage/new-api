@@ -304,6 +304,9 @@ func migrateDB() error {
 			return err
 		}
 	}
+	if err := backfillTopUpDefaults(); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -383,7 +386,29 @@ func migrateDBFast() error {
 			return err
 		}
 	}
+	if err := backfillTopUpDefaults(); err != nil {
+		return err
+	}
 	common.SysLog("database migrated")
+	return nil
+}
+
+func backfillTopUpDefaults() error {
+	topupModel := &TopUp{}
+	if DB.Migrator().HasColumn(topupModel, "invoice_status") {
+		if err := DB.Model(topupModel).
+			Where("invoice_status = '' OR invoice_status IS NULL").
+			Update("invoice_status", common.InvoiceStatusNone).Error; err != nil {
+			return err
+		}
+	}
+	if DB.Migrator().HasColumn(topupModel, "source_type") {
+		if err := DB.Model(topupModel).
+			Where("source_type = '' OR source_type IS NULL").
+			Update("source_type", common.TopUpSourceWalletTopUp).Error; err != nil {
+			return err
+		}
+	}
 	return nil
 }
 

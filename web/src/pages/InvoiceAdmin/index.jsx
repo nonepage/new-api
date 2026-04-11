@@ -8,7 +8,6 @@ import {
   Modal,
   Table,
   Tabs,
-  Tag,
   Typography,
 } from '@douyinfe/semi-ui';
 import { useTranslation } from 'react-i18next';
@@ -23,31 +22,58 @@ import {
 } from '../Invoice/invoiceShared';
 
 const { TabPane } = Tabs;
+const DEFAULT_PAGE_SIZE = 20;
 
 const InvoiceAdminPage = () => {
   const { t } = useTranslation();
   const [loading, setLoading] = useState(false);
   const [applications, setApplications] = useState([]);
   const [records, setRecords] = useState([]);
+  const [applicationsPage, setApplicationsPage] = useState(1);
+  const [applicationsPageSize, setApplicationsPageSize] =
+    useState(DEFAULT_PAGE_SIZE);
+  const [applicationsTotal, setApplicationsTotal] = useState(0);
+  const [recordsPage, setRecordsPage] = useState(1);
+  const [recordsPageSize, setRecordsPageSize] = useState(DEFAULT_PAGE_SIZE);
+  const [recordsTotal, setRecordsTotal] = useState(0);
   const [remark, setRemark] = useState('');
   const [detailApplication, setDetailApplication] = useState(null);
 
-  const loadData = async () => {
+  const loadData = async ({
+    nextApplicationsPage = applicationsPage,
+    nextApplicationsPageSize = applicationsPageSize,
+    nextRecordsPage = recordsPage,
+    nextRecordsPageSize = recordsPageSize,
+  } = {}) => {
     setLoading(true);
     try {
       const [applicationsRes, recordsRes] = await Promise.all([
         API.get('/api/invoice/admin/applications', {
-          params: { p: 1, page_size: 100 },
+          params: {
+            p: nextApplicationsPage,
+            page_size: nextApplicationsPageSize,
+          },
         }),
         API.get('/api/invoice/admin/records', {
-          params: { p: 1, page_size: 100 },
+          params: {
+            p: nextRecordsPage,
+            page_size: nextRecordsPageSize,
+          },
         }),
       ]);
       if (applicationsRes.data.success) {
-        setApplications(applicationsRes.data.data.items || []);
+        const payload = applicationsRes.data.data || {};
+        setApplications(payload.items || []);
+        setApplicationsTotal(payload.total || 0);
+        setApplicationsPage(payload.page || nextApplicationsPage);
+        setApplicationsPageSize(payload.page_size || nextApplicationsPageSize);
       }
       if (recordsRes.data.success) {
-        setRecords(recordsRes.data.data.items || []);
+        const payload = recordsRes.data.data || {};
+        setRecords(payload.items || []);
+        setRecordsTotal(payload.total || 0);
+        setRecordsPage(payload.page || nextRecordsPage);
+        setRecordsPageSize(payload.page_size || nextRecordsPageSize);
       }
     } catch (error) {
       showError(error);
@@ -101,7 +127,7 @@ const InvoiceAdminPage = () => {
             ? t('申请已通过，并已直接标记为开票成功')
             : t('申请已驳回'),
         );
-        loadData();
+        await loadData();
       } else {
         showError(res.data.message);
       }
@@ -181,7 +207,7 @@ const InvoiceAdminPage = () => {
         ),
       },
     ],
-    [t, remark],
+    [remark, t],
   );
 
   const recordColumns = useMemo(
@@ -197,7 +223,7 @@ const InvoiceAdminPage = () => {
       {
         title: t('状态'),
         dataIndex: 'status',
-        render: (value) => <Tag color='green'>{value}</Tag>,
+        render: (value) => renderInvoiceStatusTag(value, t),
       },
       {
         title: t('金额'),
@@ -228,7 +254,7 @@ const InvoiceAdminPage = () => {
                 );
                 if (res.data.success) {
                   showSuccess(t('发票已作废'));
-                  loadData();
+                  await loadData();
                 } else {
                   showError(res.data.message);
                 }
@@ -251,7 +277,7 @@ const InvoiceAdminPage = () => {
         <Typography.Title heading={4}>{t('发票管理')}</Typography.Title>
         <Typography.Text type='secondary'>
           {t(
-            '审核用户开票申请。抬头、税号、邮箱为必填项，通过后系统会直接记为开票成功，不再保留平台内发票附件存档。',
+            '审核用户开票申请。抬头、税号、邮箱为必填项，通过后系统会直接记为开票成功，不再保留平台内发票附件存档流程。',
           )}
         </Typography.Text>
       </Card>
@@ -273,13 +299,28 @@ const InvoiceAdminPage = () => {
                 value={remark}
                 onChange={setRemark}
               />
-              <Button onClick={loadData}>{t('刷新')}</Button>
+              <Button onClick={() => loadData()}>{t('刷新')}</Button>
             </div>
             <Table
               rowKey='id'
               columns={applicationColumns}
               dataSource={applications}
-              pagination={false}
+              pagination={{
+                currentPage: applicationsPage,
+                pageSize: applicationsPageSize,
+                total: applicationsTotal,
+                showSizeChanger: true,
+                pageSizeOpts: [10, 20, 50, 100],
+                onPageChange: (page) => {
+                  loadData({ nextApplicationsPage: page });
+                },
+                onPageSizeChange: (pageSize) => {
+                  loadData({
+                    nextApplicationsPage: 1,
+                    nextApplicationsPageSize: pageSize,
+                  });
+                },
+              }}
               empty={<Empty title={t('暂无申请单')} />}
             />
           </Card>
@@ -291,7 +332,22 @@ const InvoiceAdminPage = () => {
               rowKey='id'
               columns={recordColumns}
               dataSource={records}
-              pagination={false}
+              pagination={{
+                currentPage: recordsPage,
+                pageSize: recordsPageSize,
+                total: recordsTotal,
+                showSizeChanger: true,
+                pageSizeOpts: [10, 20, 50, 100],
+                onPageChange: (page) => {
+                  loadData({ nextRecordsPage: page });
+                },
+                onPageSizeChange: (pageSize) => {
+                  loadData({
+                    nextRecordsPage: 1,
+                    nextRecordsPageSize: pageSize,
+                  });
+                },
+              }}
               empty={<Empty title={t('暂无开票记录')} />}
             />
           </Card>

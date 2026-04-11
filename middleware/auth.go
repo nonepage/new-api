@@ -35,7 +35,6 @@ func authHelper(c *gin.Context, minRole int) {
 	username := session.Get("username")
 	role := session.Get("role")
 	id := session.Get("id")
-	status := session.Get("status")
 	useAccessToken := false
 	if username == nil {
 		// Check access token
@@ -62,7 +61,6 @@ func authHelper(c *gin.Context, minRole int) {
 			username = user.Username
 			role = user.Role
 			id = user.Id
-			status = user.Status
 			useAccessToken = true
 		} else {
 			c.JSON(http.StatusOK, gin.H{
@@ -101,7 +99,16 @@ func authHelper(c *gin.Context, minRole int) {
 		c.Abort()
 		return
 	}
-	if status.(int) == common.UserStatusDisabled {
+	userCache, err := model.GetUserCache(apiUserId)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"message": err.Error(),
+		})
+		c.Abort()
+		return
+	}
+	if userCache.Status == common.UserStatusDisabled {
 		c.JSON(http.StatusOK, gin.H{
 			"success": false,
 			"message": "用户已被封禁",
@@ -127,11 +134,12 @@ func authHelper(c *gin.Context, minRole int) {
 	}
 	// 防止不同newapi版本冲突，导致数据不通用
 	c.Header("Auth-Version", "864b7076dbcd0a3c01b5520316720ebf")
-	c.Set("username", username)
+	c.Set("username", userCache.Username)
 	c.Set("role", role)
 	c.Set("id", id)
-	c.Set("group", session.Get("group"))
-	c.Set("user_group", session.Get("group"))
+	c.Set("status", userCache.Status)
+	c.Set("group", userCache.Group)
+	c.Set("user_group", userCache.Group)
 	c.Set("use_access_token", useAccessToken)
 
 	c.Next()

@@ -76,6 +76,9 @@ type InvoiceRecord struct {
 	IssuerId     int                        `json:"issuer_id" gorm:"index;default:0"`
 	FileURL      string                     `json:"file_url" gorm:"type:text"`
 	Remark       string                     `json:"remark" gorm:"type:text"`
+	VoidedAt     int64                      `json:"voided_at" gorm:"type:bigint;default:0"`
+	VoidedBy     int                        `json:"voided_by" gorm:"index;default:0"`
+	VoidRemark   string                     `json:"void_remark" gorm:"type:text"`
 	CreatedAt    int64                      `json:"created_at" gorm:"bigint"`
 	UpdatedAt    int64                      `json:"updated_at" gorm:"bigint"`
 	Applications []InvoiceRecordApplication `json:"applications,omitempty" gorm:"foreignKey:InvoiceRecordId"`
@@ -281,7 +284,8 @@ func ListInvoiceAvailableTopUps(userId int, keyword string, pageInfo *common.Pag
 	if keyword != "" {
 		query = query.Where("trade_no LIKE ?", "%"+keyword+"%")
 	}
-	if err := query.Count(&total).Error; err != nil {
+	countQuery := query.Session(&gorm.Session{})
+	if err := countQuery.Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
 	if err := query.Order("id desc").Limit(pageInfo.GetPageSize()).Offset(pageInfo.GetStartIdx()).Find(&topups).Error; err != nil {
@@ -311,7 +315,8 @@ func listInvoiceApplications(query *gorm.DB, keyword string, pageInfo *common.Pa
 	if keyword != "" {
 		query = query.Where("application_no LIKE ?", "%"+keyword+"%")
 	}
-	if err := query.Count(&total).Error; err != nil {
+	countQuery := query.Session(&gorm.Session{})
+	if err := countQuery.Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
 	if err := query.Preload("Items").Order("id desc").Limit(pageInfo.GetPageSize()).Offset(pageInfo.GetStartIdx()).Find(&applications).Error; err != nil {
@@ -330,7 +335,8 @@ func ListInvoiceRecords(keyword string, userId int, pageInfo *common.PageInfo) (
 	if keyword != "" {
 		query = query.Where("invoice_no LIKE ?", "%"+keyword+"%")
 	}
-	if err := query.Count(&total).Error; err != nil {
+	countQuery := query.Session(&gorm.Session{})
+	if err := countQuery.Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
 	if err := query.Preload("Applications").Order("id desc").Limit(pageInfo.GetPageSize()).Offset(pageInfo.GetStartIdx()).Find(&records).Error; err != nil {
@@ -659,9 +665,10 @@ func VoidInvoiceRecord(recordId int, operatorId int, remark string) error {
 			applicationIDs = append(applicationIDs, link.ApplicationId)
 		}
 		if err := tx.Model(&InvoiceRecord{}).Where("id = ?", record.Id).Updates(map[string]interface{}{
-			"status":    common.InvoiceRecordStatusVoided,
-			"remark":    strings.TrimSpace(remark),
-			"issuer_id": operatorId,
+			"status":      common.InvoiceRecordStatusVoided,
+			"voided_at":   common.GetTimestamp(),
+			"voided_by":   operatorId,
+			"void_remark": strings.TrimSpace(remark),
 		}).Error; err != nil {
 			return err
 		}

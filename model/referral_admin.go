@@ -52,60 +52,82 @@ type referralTopUpAggregate struct {
 }
 
 func GetReferralAdminSummary() (*ReferralAdminSummary, error) {
-	invitees, _, err := listReferralInvitees(DB.Model(&User{}), "", nil)
-	if err != nil {
+	summary := &ReferralAdminSummary{}
+	relationQuery := DB.Model(&User{}).Where("inviter_id > 0")
+
+	if err := relationQuery.Count(&summary.TotalRelations).Error; err != nil {
 		return nil, err
 	}
-	summary := &ReferralAdminSummary{
-		TotalRelations: int64(len(invitees)),
-	}
-	if len(invitees) == 0 {
+	if summary.TotalRelations == 0 {
 		return summary, nil
 	}
 
-	inviteeIDs := make([]int, 0, len(invitees))
-	inviterIDs := make([]int, 0, len(invitees))
-	inviterIDSet := make(map[int]struct{})
-	for _, invitee := range invitees {
-		inviteeIDs = append(inviteeIDs, invitee.Id)
-		if invitee.InviterId > 0 {
-			if _, ok := inviterIDSet[invitee.InviterId]; !ok {
-				inviterIDSet[invitee.InviterId] = struct{}{}
-				inviterIDs = append(inviterIDs, invitee.InviterId)
-			}
-		}
-		summary.TotalInviteeUsedQuota += int64(invitee.UsedQuota)
-	}
-	summary.InviterCount = int64(len(inviterIDs))
-
-	userMap, err := getUsersByIDs(append(append([]int{}, inviteeIDs...), inviterIDs...))
-	if err != nil {
-		return nil, err
-	}
-	aggregates, err := getReferralTopUpAggregates(inviteeIDs, inviterIDs)
-	if err != nil {
+	if err := DB.Model(&User{}).Where("inviter_id > 0").Distinct("inviter_id").Count(&summary.InviterCount).Error; err != nil {
 		return nil, err
 	}
 
-	for _, invitee := range invitees {
-		inviter := userMap[invitee.InviterId]
-		inviteeTopup := aggregates[invitee.Id]
-		inviterTopup := aggregates[invitee.InviterId]
-		if inviteeTopup.TotalAmount > 0 {
-			summary.InviteeWithTopUpCount++
-			summary.TotalInviteeTopUp += inviteeTopup.TotalAmount
-		}
-		if inviter != nil {
-			if invitee.RegisterIP != "" && inviter.RegisterIP != "" && invitee.RegisterIP == inviter.RegisterIP {
-				summary.SameRegisterIPCount++
-			}
-			if invitee.LastLoginIP != "" && inviter.LastLoginIP != "" && invitee.LastLoginIP == inviter.LastLoginIP {
-				summary.SameLoginIPCount++
-			}
-			if inviteeTopup.LastIP != "" && inviterTopup.LastIP != "" && inviteeTopup.LastIP == inviterTopup.LastIP {
-				summary.SameTopUpIPCount++
-			}
-		}
+	type usedQuotaSummary struct {
+		TotalUsedQuota int64 `gorm:"column:total_used_quota"`
+	}
+	var usedQuota usedQuotaSummary
+	if err := DB.Model(&User{}).
+		Select("COALESCE(SUM(used_quota), 0) AS total_used_quota").
+		Where("inviter_id > 0").
+		Scan(&usedQuota).Error; err != nil {
+		return nil, err
+	}
+	summary.TotalInviteeUsedQuota = usedQuota.TotalUsedQuota
+
+	type topUpSummary struct {
+		InviteeWithTopUpCount int64   `gorm:"column:invitee_with_topup_count"`
+		TotalInviteeTopUp     float64 `gorm:"column:total_invitee_topup"`
+	}
+	var rechargeSummary topUpSummary
+	effectiveAmountExpr := "CASE WHEN top_ups.paid_amount > 0 THEN top_ups.paid_amount WHEN top_ups.money > 0 THEN top_ups.money ELSE top_ups.amount END"
+	if err := DB.Table("top_ups").
+		Joins("JOIN users invitees ON invitees.id = top_ups.user_id").
+		Select("COUNT(DISTINCT top_ups.user_id) AS invitee_with_topup_count, COALESCE(SUM("+effectiveAmountExpr+"), 0) AS total_invitee_topup").
+		Where("invitees.inviter_id > 0 AND top_ups.status = ?", common.TopUpStatusSuccess).
+		Scan(&rechargeSummary).Error; err != nil {
+		return nil, err
+	}
+	summary.InviteeWithTopUpCount = rechargeSummary.InviteeWithTopUpCount
+	summary.TotalInviteeTopUp = rechargeSummary.TotalInviteeTopUp
+
+	if err := DB.Table("users AS invitees").
+		Joins("JOIN users AS inviters ON inviters.id = invitees.inviter_id").
+		Where("invitees.inviter_id > 0").
+		Where("invitees.register_ip <> '' AND inviters.register_ip <> ''").
+		Where("invitees.register_ip = inviters.register_ip").
+		Count(&summary.SameRegisterIPCount).Error; err != nil {
+		return nil, err
+	}
+
+	if err := DB.Table("users AS invitees").
+		Joins("JOIN users AS inviters ON inviters.id = invitees.inviter_id").
+		Where("invitees.inviter_id > 0").
+		Where("invitees.last_login_ip <> '' AND inviters.last_login_ip <> ''").
+		Where("invitees.last_login_ip = inviters.last_login_ip").
+		Count(&summary.SameLoginIPCount).Error; err != nil {
+		return nil, err
+	}
+
+	latestTopUpSubQuery := DB.Model(&TopUp{}).
+		Select("user_id, MAX(id) AS latest_id").
+		Where("status = ?", common.TopUpStatusSuccess).
+		Group("user_id")
+
+	if err := DB.Table("users AS invitees").
+		Joins("JOIN users AS inviters ON inviters.id = invitees.inviter_id").
+		Joins("JOIN (?) AS invitee_latest ON invitee_latest.user_id = invitees.id", latestTopUpSubQuery).
+		Joins("JOIN top_ups AS invitee_topups ON invitee_topups.id = invitee_latest.latest_id").
+		Joins("JOIN (?) AS inviter_latest ON inviter_latest.user_id = inviters.id", latestTopUpSubQuery).
+		Joins("JOIN top_ups AS inviter_topups ON inviter_topups.id = inviter_latest.latest_id").
+		Where("invitees.inviter_id > 0").
+		Where("invitee_topups.client_ip <> '' AND inviter_topups.client_ip <> ''").
+		Where("invitee_topups.client_ip = inviter_topups.client_ip").
+		Count(&summary.SameTopUpIPCount).Error; err != nil {
+		return nil, err
 	}
 
 	return summary, nil
@@ -261,7 +283,8 @@ func listReferralInvitees(baseQuery *gorm.DB, keyword string, pageInfo *common.P
 	}
 
 	var total int64
-	if err := query.Count(&total).Error; err != nil {
+	countQuery := query.Session(&gorm.Session{})
+	if err := countQuery.Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
 

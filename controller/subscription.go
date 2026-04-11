@@ -88,7 +88,7 @@ func GetSubscriptionConversionPreview(c *gin.Context) {
 func ConvertSubscriptionToWallet(c *gin.Context) {
 	userId := c.GetInt("id")
 	var req SubscriptionConversionRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
+	if err := common.DecodeJson(c.Request.Body, &req); err != nil {
 		common.ApiErrorMsg(c, "参数错误")
 		return
 	}

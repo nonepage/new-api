@@ -12,6 +12,8 @@ import {
 import { useTranslation } from 'react-i18next';
 import { API, showError } from '../../helpers';
 
+const DEFAULT_PAGE_SIZE = 20;
+
 const formatAmount = (amount) => Number(amount || 0).toFixed(2);
 const formatTime = (timestamp) => {
   if (!timestamp) return '-';
@@ -34,23 +36,38 @@ const ReferralAdminPage = () => {
   const [keyword, setKeyword] = useState('');
   const [summary, setSummary] = useState(null);
   const [relations, setRelations] = useState([]);
+  const [relationPage, setRelationPage] = useState(1);
+  const [relationPageSize, setRelationPageSize] = useState(DEFAULT_PAGE_SIZE);
+  const [relationTotal, setRelationTotal] = useState(0);
   const [detail, setDetail] = useState(null);
   const [detailVisible, setDetailVisible] = useState(false);
 
-  const loadData = async (nextKeyword = keyword) => {
+  const loadData = async ({
+    nextKeyword = keyword,
+    nextPage = relationPage,
+    nextPageSize = relationPageSize,
+  } = {}) => {
     setLoading(true);
     try {
       const [summaryRes, relationsRes] = await Promise.all([
         API.get('/api/referral/admin/summary'),
         API.get('/api/referral/admin/relations', {
-          params: { p: 1, page_size: 100, keyword: nextKeyword || undefined },
+          params: {
+            p: nextPage,
+            page_size: nextPageSize,
+            keyword: nextKeyword || undefined,
+          },
         }),
       ]);
       if (summaryRes.data.success) {
         setSummary(summaryRes.data.data);
       }
       if (relationsRes.data.success) {
-        setRelations(relationsRes.data.data.items || []);
+        const payload = relationsRes.data.data || {};
+        setRelations(payload.items || []);
+        setRelationTotal(payload.total || 0);
+        setRelationPage(payload.page || nextPage);
+        setRelationPageSize(payload.page_size || nextPageSize);
       }
     } catch (error) {
       showError(error);
@@ -60,7 +77,7 @@ const ReferralAdminPage = () => {
   };
 
   useEffect(() => {
-    loadData('');
+    loadData({ nextKeyword: '' });
   }, []);
 
   const relationColumns = useMemo(
@@ -173,7 +190,8 @@ const ReferralAdminPage = () => {
       },
       {
         title: t('时间'),
-        render: (_, record) => formatTime(record.complete_time || record.create_time),
+        render: (_, record) =>
+          formatTime(record.complete_time || record.create_time),
       },
     ],
     [t],
@@ -219,16 +237,37 @@ const ReferralAdminPage = () => {
             value={keyword}
             onChange={setKeyword}
           />
-          <Button theme='solid' onClick={() => loadData(keyword)}>
+          <Button
+            theme='solid'
+            onClick={() => loadData({ nextKeyword: keyword, nextPage: 1 })}
+          >
             {t('搜索')}
           </Button>
-          <Button onClick={() => loadData(keyword)}>{t('刷新')}</Button>
+          <Button onClick={() => loadData({ nextKeyword: keyword })}>
+            {t('刷新')}
+          </Button>
         </div>
         <Table
           rowKey='invitee_id'
           columns={relationColumns}
           dataSource={relations}
-          pagination={false}
+          pagination={{
+            currentPage: relationPage,
+            pageSize: relationPageSize,
+            total: relationTotal,
+            showSizeChanger: true,
+            pageSizeOpts: [10, 20, 50, 100],
+            onPageChange: (page) => {
+              loadData({ nextKeyword: keyword, nextPage: page });
+            },
+            onPageSizeChange: (pageSize) => {
+              loadData({
+                nextKeyword: keyword,
+                nextPage: 1,
+                nextPageSize: pageSize,
+              });
+            },
+          }}
           empty={<Empty title={t('暂无邀请关系')} />}
         />
       </Card>

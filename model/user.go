@@ -694,13 +694,13 @@ func (user *User) ValidateAndFill() (err error) {
 	password := user.Password
 	username := strings.TrimSpace(user.Username)
 	if username == "" || password == "" {
-		return errors.New("閻劍鍩涢崥宥嗗灗鐎靛棛鐖滄稉铏光敄")
+		return errors.New("username or password is empty")
 	}
 	// find buy username or email
 	DB.Where("username = ? OR email = ?", username, username).First(user)
 	okay := common.ValidatePasswordAndHash(password, user.Password)
 	if !okay || user.Status != common.UserStatusEnabled {
-		return errors.New("閻劍鍩涢崥宥嗗灗鐎靛棛鐖滈柨娆掝嚖閿涘本鍨ㄩ悽銊﹀煕瀹歌尪顫︾亸浣侯洣")
+		return errors.New("invalid username or password, or user is banned")
 	}
 	return nil
 }
@@ -798,7 +798,7 @@ func IsTelegramIdAlreadyTaken(telegramId string) bool {
 
 func ResetUserPasswordByEmail(email string, password string) error {
 	if email == "" || password == "" {
-		return errors.New("insufficient affiliate quota")
+		return errors.New("email or password is empty")
 	}
 	hashedPassword, err := common.Password2Hash(password)
 	if err != nil {
@@ -969,7 +969,7 @@ func GetUserSetting(id int, fromDB bool) (settingMap dto.UserSetting, err error)
 
 func IncreaseUserQuota(id int, quota int, db bool) (err error) {
 	if quota < 0 {
-		return errors.New("insufficient affiliate quota")
+		return errors.New("quota cannot be negative")
 	}
 	gopool.Go(func() {
 		err := cacheIncrUserQuota(id, int64(quota))
@@ -994,7 +994,7 @@ func increaseUserQuota(id int, quota int) (err error) {
 
 func DecreaseUserQuota(id int, quota int) (err error) {
 	if quota < 0 {
-		return errors.New("insufficient affiliate quota")
+		return errors.New("quota cannot be negative")
 	}
 	gopool.Go(func() {
 		err := cacheDecrUserQuota(id, int64(quota))
