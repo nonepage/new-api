@@ -1,10 +1,13 @@
 package model
 
 import (
+	"net/http/httptest"
 	"testing"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/dto"
+	"github.com/gin-gonic/gin"
 	"github.com/shopspring/decimal"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -359,4 +362,39 @@ func TestApproveInvoiceApplication_WritesAdminAndUserAuditLogs(t *testing.T) {
 		Where("user_id = ? AND type = ? AND content LIKE ?", user.Id, LogTypeSystem, "%was approved%").
 		Count(&userLogCount).Error)
 	assert.EqualValues(t, 1, userLogCount)
+}
+
+func TestRecordConsumeLog_AlwaysStoresClientIP(t *testing.T) {
+	prepareReviewRegressionTest(t)
+	gin.SetMode(gin.TestMode)
+
+	user := createReviewTestUser(t, "ip-log-user", 0, "", "")
+	settings := dto.UserSetting{RecordIpLog: false}
+	user.SetSetting(settings)
+	require.NoError(t, DB.Model(&User{}).Where("id = ?", user.Id).Update("setting", user.Setting).Error)
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	request := httptest.NewRequest("POST", "/v1/chat/completions", nil)
+	request.RemoteAddr = "203.0.113.8:4567"
+	ctx.Request = request
+	ctx.Set("username", user.Username)
+
+	RecordConsumeLog(ctx, user.Id, RecordConsumeLogParams{
+		ChannelId:        1,
+		PromptTokens:     10,
+		CompletionTokens: 20,
+		ModelName:        "gpt-test",
+		TokenName:        "token-test",
+		Quota:            100,
+		Content:          "consume",
+		TokenId:          1,
+		UseTimeSeconds:   3,
+		Group:            "default",
+		Other:            map[string]interface{}{"k": "v"},
+	})
+
+	var log Log
+	require.NoError(t, DB.Where("user_id = ? AND type = ?", user.Id, LogTypeConsume).First(&log).Error)
+	assert.Equal(t, "203.0.113.8", log.Ip)
 }
