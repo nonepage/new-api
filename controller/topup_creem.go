@@ -5,17 +5,16 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/QuantumNous/new-api/common"
-	"github.com/QuantumNous/new-api/model"
-	"github.com/QuantumNous/new-api/setting"
 	"io"
 	"log"
 	"net/http"
 	"time"
 
+	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/setting"
 	"github.com/gin-gonic/gin"
 	"github.com/thanhpk/randstr"
 )
@@ -37,7 +36,7 @@ func generateCreemSignature(payload string, secret string) string {
 // 楠岃瘉Creem webhook绛惧悕
 func verifyCreemSignature(payload string, signature string, secret string) bool {
 	if secret == "" {
-		log.Printf("Creem Webhook missing signature")
+		log.Printf("Creem Webhook secret is not configured")
 		if setting.CreemTestMode {
 			log.Printf("Skip Creem webhook sign verify in test mode")
 			return true
@@ -77,7 +76,7 @@ func (*CreemAdaptor) RequestPay(c *gin.Context, req *CreemPayRequest) {
 	}
 
 	var products []CreemProduct
-	err := json.Unmarshal([]byte(setting.CreemProducts), &products)
+	err := common.UnmarshalJsonStr(setting.CreemProducts, &products)
 	if err != nil {
 		log.Println("failed to parse Creem products", err)
 		c.JSON(200, gin.H{"message": "error", "data": "product config error"})
@@ -248,12 +247,12 @@ func CreemWebhook(c *gin.Context) {
 
 	// 楠岃瘉绛惧悕
 	if !verifyCreemSignature(string(bodyBytes), signature, setting.CreemWebhookSecret) {
-		log.Printf("Creem Webhook missing signature")
+		log.Printf("Creem Webhook signature verification failed")
 		c.AbortWithStatus(http.StatusUnauthorized)
 		return
 	}
 
-	log.Printf("Creem Webhook missing signature")
+	log.Printf("Creem Webhook signature verified")
 
 	// 閲嶆柊璁剧疆body渚涘悗缁殑ShouldBindJSON浣跨敤
 	c.Request.Body = io.NopCloser(bytes.NewReader(bodyBytes))
@@ -266,7 +265,7 @@ func CreemWebhook(c *gin.Context) {
 		return
 	}
 
-	log.Printf("Creem Webhook missing signature")
+	log.Printf("Creem Webhook parsed - EventType: %s, EventId: %s", webhookEvent.EventType, webhookEvent.Id)
 
 	// 鏍规嵁浜嬩欢绫诲瀷澶勭悊涓嶅悓鐨剋ebhook
 	switch webhookEvent.EventType {
@@ -375,7 +374,7 @@ func genCreemLink(referenceId string, product *CreemProduct, email string, usern
 		},
 	}
 
-	jsonData, err := json.Marshal(requestData)
+	jsonData, err := common.Marshal(requestData)
 	if err != nil {
 		return "", fmt.Errorf("failed to marshal Creem request: %v", err)
 	}
@@ -407,7 +406,7 @@ func genCreemLink(referenceId string, product *CreemProduct, email string, usern
 	}
 
 	var checkoutResp CreemCheckoutResponse
-	if err := json.Unmarshal(body, &checkoutResp); err != nil {
+	if err := common.Unmarshal(body, &checkoutResp); err != nil {
 		return "", fmt.Errorf("failed to parse Creem response: %v", err)
 	}
 	if checkoutResp.CheckoutUrl == "" {

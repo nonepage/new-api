@@ -397,7 +397,7 @@ func CreateInvoiceApplication(userId int, topupIDs []int, snapshot InvoiceProfil
 	var auditLog string
 	err = DB.Transaction(func(tx *gorm.DB) error {
 		var topups []*TopUp
-		if err := tx.Set("gorm:query_option", "FOR UPDATE").Where("id IN ? AND user_id = ? AND status = ? AND invoice_status = ?", uniqueIDs, userId, common.TopUpStatusSuccess, common.InvoiceStatusNone).Find(&topups).Error; err != nil {
+		if err := withRowLock(tx).Where("id IN ? AND user_id = ? AND status = ? AND invoice_status = ?", uniqueIDs, userId, common.TopUpStatusSuccess, common.InvoiceStatusNone).Find(&topups).Error; err != nil {
 			return err
 		}
 		if len(topups) != len(uniqueIDs) {
@@ -464,7 +464,7 @@ func CancelInvoiceApplication(userId int, applicationId int) error {
 	var auditLog string
 	err := DB.Transaction(func(tx *gorm.DB) error {
 		var application InvoiceApplication
-		if err := tx.Set("gorm:query_option", "FOR UPDATE").Where("id = ? AND user_id = ?", applicationId, userId).First(&application).Error; err != nil {
+		if err := withRowLock(tx).Where("id = ? AND user_id = ?", applicationId, userId).First(&application).Error; err != nil {
 			return err
 		}
 		if application.Status != common.InvoiceApplicationStatusPendingReview {
@@ -505,7 +505,7 @@ func ApproveInvoiceApplication(applicationId int, reviewerId int, adminRemark st
 	var currency string
 	err := DB.Transaction(func(tx *gorm.DB) error {
 		var application InvoiceApplication
-		if err := tx.Set("gorm:query_option", "FOR UPDATE").Preload("Items").Where("id = ?", applicationId).First(&application).Error; err != nil {
+		if err := withRowLock(tx).Preload("Items").Where("id = ?", applicationId).First(&application).Error; err != nil {
 			return err
 		}
 		if application.Status != common.InvoiceApplicationStatusPendingReview {
@@ -561,7 +561,7 @@ func RejectInvoiceApplication(applicationId int, reviewerId int, rejectedReason 
 	var targetUserId int
 	err := DB.Transaction(func(tx *gorm.DB) error {
 		var application InvoiceApplication
-		if err := tx.Set("gorm:query_option", "FOR UPDATE").Where("id = ?", applicationId).First(&application).Error; err != nil {
+		if err := withRowLock(tx).Where("id = ?", applicationId).First(&application).Error; err != nil {
 			return err
 		}
 		if application.Status != common.InvoiceApplicationStatusPendingReview {
@@ -627,7 +627,7 @@ func IssueInvoiceRecord(applicationIDs []int, issuerId int, invoiceNo string, fi
 			common.InvoiceApplicationStatusPendingReview,
 			common.InvoiceApplicationStatusApproved,
 		}
-		if err := tx.Set("gorm:query_option", "FOR UPDATE").Preload("Items").Where("id IN ? AND status IN ?", uniqueIDs, issueableStatuses).Find(&applications).Error; err != nil {
+		if err := withRowLock(tx).Preload("Items").Where("id IN ? AND status IN ?", uniqueIDs, issueableStatuses).Find(&applications).Error; err != nil {
 			return err
 		}
 		if len(applications) != len(uniqueIDs) {
@@ -708,7 +708,7 @@ func VoidInvoiceRecord(recordId int, operatorId int, remark string) error {
 	var targetUserId int
 	err := DB.Transaction(func(tx *gorm.DB) error {
 		var record InvoiceRecord
-		if err := tx.Set("gorm:query_option", "FOR UPDATE").Where("id = ?", recordId).First(&record).Error; err != nil {
+		if err := withRowLock(tx).Where("id = ?", recordId).First(&record).Error; err != nil {
 			return err
 		}
 		if record.Status != common.InvoiceRecordStatusIssued {

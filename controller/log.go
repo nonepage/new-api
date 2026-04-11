@@ -47,6 +47,11 @@ func GetUserLogs(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
+	if userSetting, settingErr := model.GetUserSetting(userId, false); settingErr == nil && !userSetting.RecordIpLog {
+		for i := range logs {
+			logs[i].Ip = ""
+		}
+	}
 	pageInfo.SetTotal(int(total))
 	pageInfo.SetItems(logs)
 	common.ApiSuccess(c, pageInfo)
@@ -85,6 +90,11 @@ func GetLogByKey(c *gin.Context) {
 			"message": err.Error(),
 		})
 		return
+	}
+	if userSetting, settingErr := model.GetUserSetting(c.GetInt("id"), false); settingErr == nil && !userSetting.RecordIpLog {
+		for i := range logs {
+			logs[i].Ip = ""
+		}
 	}
 	c.JSON(200, gin.H{
 		"success": true,

@@ -645,7 +645,7 @@ func CompleteSubscriptionOrder(tradeNo string, providerPayload string) error {
 	var upgradeGroup string
 	err := DB.Transaction(func(tx *gorm.DB) error {
 		var order SubscriptionOrder
-		if err := tx.Set("gorm:query_option", "FOR UPDATE").Where(refCol+" = ?", tradeNo).First(&order).Error; err != nil {
+		if err := withRowLock(tx).Where(refCol+" = ?", tradeNo).First(&order).Error; err != nil {
 			return ErrSubscriptionOrderNotFound
 		}
 		if order.Status == common.TopUpStatusSuccess {
@@ -769,7 +769,7 @@ func ExpireSubscriptionOrder(tradeNo string) error {
 	}
 	return DB.Transaction(func(tx *gorm.DB) error {
 		var order SubscriptionOrder
-		if err := tx.Set("gorm:query_option", "FOR UPDATE").Where(refCol+" = ?", tradeNo).First(&order).Error; err != nil {
+		if err := withRowLock(tx).Where(refCol+" = ?", tradeNo).First(&order).Error; err != nil {
 			return ErrSubscriptionOrderNotFound
 		}
 		if order.Status != common.TopUpStatusPending {
@@ -998,6 +998,7 @@ func buildSubscriptionConversionPreview(userId int, userGroup string, entries []
 	items := make([]SubscriptionConversionPreviewItem, 0, len(entries))
 	totalRefundMoney := decimal.Zero
 	var totalRefundQuota int64
+	defaultUserGroup := getDefaultUserGroupName()
 
 	for _, entry := range entries {
 		item, err := calculateSubscriptionConversionPreviewItem(now, entry.Subscription, entry.Plan)
@@ -1016,7 +1017,7 @@ func buildSubscriptionConversionPreview(userId int, userGroup string, entries []
 			TotalRefundMoney:  totalRefundMoney.Round(6).InexactFloat64(),
 			TotalRefundQuota:  totalRefundQuota,
 			UserGroupBefore:   userGroup,
-			UserGroupAfter:    "default",
+			UserGroupAfter:    defaultUserGroup,
 			CanConvert:        len(items) > 0,
 		},
 	}, nil
@@ -1046,6 +1047,7 @@ func ExecuteSubscriptionWalletConversion(userId int, requestId string) (*Subscri
 	if requestId == "" {
 		return nil, errors.New("request_id is empty")
 	}
+	defaultUserGroup := getDefaultUserGroupName()
 
 	var result *SubscriptionConversionResult
 	var logMessage string
@@ -1101,7 +1103,7 @@ func ExecuteSubscriptionWalletConversion(userId int, requestId string) (*Subscri
 			TotalRefundMoney:  preview.Summary.TotalRefundMoney,
 			TotalRefundQuota:  preview.Summary.TotalRefundQuota,
 			UserGroupBefore:   userGroup,
-			UserGroupAfter:    "default",
+			UserGroupAfter:    defaultUserGroup,
 		}
 		if err := tx.Create(batch).Error; err != nil {
 			if existingBatch, findErr := findSubscriptionConversionBatchByRequestIdTx(tx, requestId); findErr == nil && existingBatch.Status == "success" {
@@ -1168,7 +1170,7 @@ func ExecuteSubscriptionWalletConversion(userId int, requestId string) (*Subscri
 		}
 
 		userUpdates := map[string]interface{}{
-			"group": "default",
+			"group": defaultUserGroup,
 		}
 		if preview.Summary.TotalRefundQuota > 0 {
 			userUpdates["quota"] = gorm.Expr("quota + ?", preview.Summary.TotalRefundQuota)
@@ -1194,13 +1196,14 @@ func ExecuteSubscriptionWalletConversion(userId int, requestId string) (*Subscri
 			TotalRefundMoney:  preview.Summary.TotalRefundMoney,
 			TotalRefundQuota:  preview.Summary.TotalRefundQuota,
 			UserGroupBefore:   userGroup,
-			UserGroupAfter:    "default",
+			UserGroupAfter:    defaultUserGroup,
 			NewUserQuota:      newQuota,
 		}
-		logMessage = fmt.Sprintf("套餐折算并回到余额分组成功，共转换 %d 个有效套餐，返还额度 %s，用户分组从 %s 回退到余额分组(default)",
+		logMessage = fmt.Sprintf("????????????????? %d ?????????? %s?????? %s ???????(%s)",
 			preview.Summary.SubscriptionCount,
 			logger.FormatQuota(int(preview.Summary.TotalRefundQuota)),
 			userGroup,
+			defaultUserGroup,
 		)
 		return nil
 	})
@@ -1209,8 +1212,12 @@ func ExecuteSubscriptionWalletConversion(userId int, requestId string) (*Subscri
 	}
 
 	if result != nil {
-		_ = updateUserQuotaCache(userId, result.NewUserQuota)
-		_ = UpdateUserGroupCache(userId, "default")
+		if user, userErr := GetUserById(userId, false); userErr == nil {
+			_ = updateUserCache(*user)
+		} else {
+			_ = updateUserQuotaCache(userId, result.NewUserQuota)
+			_ = UpdateUserGroupCache(userId, result.UserGroupAfter)
+		}
 	}
 	if logMessage != "" {
 		RecordLog(userId, LogTypeTopup, logMessage)
@@ -1229,7 +1236,7 @@ func AdminInvalidateUserSubscription(userSubscriptionId int) (string, error) {
 	var userId int
 	err := DB.Transaction(func(tx *gorm.DB) error {
 		var sub UserSubscription
-		if err := tx.Set("gorm:query_option", "FOR UPDATE").
+		if err := withRowLock(tx).
 			Where("id = ?", userSubscriptionId).First(&sub).Error; err != nil {
 			return err
 		}
@@ -1274,7 +1281,7 @@ func AdminDeleteUserSubscription(userSubscriptionId int) (string, error) {
 	var userId int
 	err := DB.Transaction(func(tx *gorm.DB) error {
 		var sub UserSubscription
-		if err := tx.Set("gorm:query_option", "FOR UPDATE").
+		if err := withRowLock(tx).
 			Where("id = ?", userSubscriptionId).First(&sub).Error; err != nil {
 			return err
 		}
@@ -1497,7 +1504,7 @@ func PreConsumeUserSubscription(requestId string, userId int, modelName string, 
 		}
 
 		var subs []UserSubscription
-		if err := tx.Set("gorm:query_option", "FOR UPDATE").
+		if err := withRowLock(tx).
 			Where("user_id = ? AND status = ? AND end_time > ?", userId, "active", now).
 			Order("end_time asc, id asc").
 			Find(&subs).Error; err != nil {
@@ -1570,7 +1577,7 @@ func RefundSubscriptionPreConsume(requestId string) error {
 	}
 	return DB.Transaction(func(tx *gorm.DB) error {
 		var record SubscriptionPreConsumeRecord
-		if err := tx.Set("gorm:query_option", "FOR UPDATE").
+		if err := withRowLock(tx).
 			Where("request_id = ?", requestId).First(&record).Error; err != nil {
 			return err
 		}
@@ -1614,7 +1621,7 @@ func ResetDueSubscriptions(limit int) (int, error) {
 		}
 		err = DB.Transaction(func(tx *gorm.DB) error {
 			var locked UserSubscription
-			if err := tx.Set("gorm:query_option", "FOR UPDATE").
+			if err := withRowLock(tx).
 				Where("id = ? AND next_reset_time > 0 AND next_reset_time <= ?", subCopy.Id, now).
 				First(&locked).Error; err != nil {
 				return nil
@@ -1681,7 +1688,7 @@ func PostConsumeUserSubscriptionDelta(userSubscriptionId int, delta int64) error
 	}
 	return DB.Transaction(func(tx *gorm.DB) error {
 		var sub UserSubscription
-		if err := tx.Set("gorm:query_option", "FOR UPDATE").
+		if err := withRowLock(tx).
 			Where("id = ?", userSubscriptionId).
 			First(&sub).Error; err != nil {
 			return err

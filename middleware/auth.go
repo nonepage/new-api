@@ -108,7 +108,7 @@ func authHelper(c *gin.Context, minRole int) {
 	if userCache.Status == common.UserStatusDisabled {
 		c.JSON(http.StatusOK, gin.H{
 			"success": false,
-				"message": "用户已被封禁",
+			"message": "用户已被封禁",
 		})
 		c.Abort()
 		return
@@ -116,7 +116,7 @@ func authHelper(c *gin.Context, minRole int) {
 	if userCache.Role < minRole {
 		c.JSON(http.StatusOK, gin.H{
 			"success": false,
-				"message": "无权进行此操作，权限不足",
+			"message": "无权进行此操作，权限不足",
 		})
 		c.Abort()
 		return
@@ -124,7 +124,7 @@ func authHelper(c *gin.Context, minRole int) {
 	if !validUserInfo(userCache.Username, userCache.Role) {
 		c.JSON(http.StatusOK, gin.H{
 			"success": false,
-				"message": "无权进行此操作，用户信息无效",
+			"message": "无权进行此操作，用户信息无效",
 		})
 		c.Abort()
 		return

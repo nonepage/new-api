@@ -251,13 +251,13 @@ func buildReferralRiskTags(inviter *User, invitee *User, inviterTopup referralTo
 		return tags
 	}
 	if invitee.RegisterIP != "" && inviter.RegisterIP != "" && invitee.RegisterIP == inviter.RegisterIP {
-		tags = append(tags, "注册IP一致")
+		tags = append(tags, "注册 IP 一致")
 	}
 	if invitee.LastLoginIP != "" && inviter.LastLoginIP != "" && invitee.LastLoginIP == inviter.LastLoginIP {
-		tags = append(tags, "最近登录IP一致")
+		tags = append(tags, "最近登录 IP 一致")
 	}
 	if inviteeTopup.LastIP != "" && inviterTopup.LastIP != "" && inviteeTopup.LastIP == inviterTopup.LastIP {
-		tags = append(tags, "最近支付IP一致")
+		tags = append(tags, "最近支付 IP 一致")
 	}
 	if inviteeTopup.TotalAmount > 0 && invitee.UsedQuota == 0 {
 		tags = append(tags, "有充值但无消费")
@@ -275,7 +275,9 @@ func listReferralInvitees(baseQuery *gorm.DB, keyword string, pageInfo *common.P
 			Pluck("id", &inviterIDs).Error; err != nil {
 			return nil, 0, err
 		}
-		searchQuery := query.Where("username LIKE ? OR display_name LIKE ? OR email LIKE ?", like, like, like)
+		searchQuery := query.Where(
+			DB.Where("username LIKE ? OR display_name LIKE ? OR email LIKE ?", like, like, like),
+		)
 		if len(inviterIDs) > 0 {
 			searchQuery = searchQuery.Or("inviter_id IN ?", inviterIDs)
 		}
@@ -321,20 +323,47 @@ func getReferralTopUpAggregates(inviteeIDs []int, inviterIDs []int) (map[int]ref
 	if len(userIDs) == 0 {
 		return aggregates, nil
 	}
-	var topups []*TopUp
-	if err := DB.Where("user_id IN ? AND status = ?", userIDs, common.TopUpStatusSuccess).
-		Order("user_id asc").
-		Order("id desc").
-		Find(&topups).Error; err != nil {
+
+	type totalRow struct {
+		UserId      int     `gorm:"column:user_id"`
+		TotalAmount float64 `gorm:"column:total_amount"`
+	}
+	var totalRows []totalRow
+	effectiveAmountExpr := "CASE WHEN paid_amount > 0 THEN paid_amount WHEN money > 0 THEN money ELSE amount END"
+	if err := DB.Model(&TopUp{}).
+		Select("user_id, COALESCE(SUM("+effectiveAmountExpr+"), 0) AS total_amount").
+		Where("user_id IN ? AND status = ?", userIDs, common.TopUpStatusSuccess).
+		Group("user_id").
+		Scan(&totalRows).Error; err != nil {
 		return nil, err
 	}
-	for _, topup := range topups {
-		aggregate := aggregates[topup.UserId]
-		aggregate.TotalAmount += topup.GetEffectivePaidAmount()
-		if aggregate.LastIP == "" && topup.ClientIP != "" {
-			aggregate.LastIP = topup.ClientIP
-		}
-		aggregates[topup.UserId] = aggregate
+	for _, row := range totalRows {
+		aggregate := aggregates[row.UserId]
+		aggregate.TotalAmount = row.TotalAmount
+		aggregates[row.UserId] = aggregate
 	}
+
+	latestTopUpSubQuery := DB.Model(&TopUp{}).
+		Select("user_id, MAX(id) AS latest_id").
+		Where("user_id IN ? AND status = ?", userIDs, common.TopUpStatusSuccess).
+		Group("user_id")
+
+	type latestRow struct {
+		UserId int    `gorm:"column:user_id"`
+		LastIP string `gorm:"column:last_ip"`
+	}
+	var latestRows []latestRow
+	if err := DB.Table("top_ups AS topup").
+		Select("topup.user_id, topup.client_ip AS last_ip").
+		Joins("JOIN (?) AS latest ON latest.latest_id = topup.id", latestTopUpSubQuery).
+		Scan(&latestRows).Error; err != nil {
+		return nil, err
+	}
+	for _, row := range latestRows {
+		aggregate := aggregates[row.UserId]
+		aggregate.LastIP = row.LastIP
+		aggregates[row.UserId] = aggregate
+	}
+
 	return aggregates, nil
 }

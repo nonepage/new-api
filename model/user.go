@@ -83,15 +83,7 @@ func (user *User) SetAccessToken(token string) {
 }
 
 func (user *User) GetSetting() dto.UserSetting {
-	setting := dto.UserSetting{}
-	if user.Setting != "" {
-		err := common.UnmarshalJsonStr(user.Setting, &setting)
-		if err != nil {
-			common.SysLog("failed to unmarshal setting: " + err.Error())
-		}
-	}
-	setting.RecordIpLog = true
-	return setting
+	return parseUserSetting(user.Setting)
 }
 
 func (user *User) SetSetting(setting dto.UserSetting) {
@@ -107,14 +99,14 @@ func (user *User) SetSetting(setting dto.UserSetting) {
 func generateDefaultSidebarConfigForRole(userRole int) string {
 	defaultConfig := map[string]interface{}{}
 
-	// 閼卞﹤銇夐崠鍝勭厵 - 閹碘偓閺堝鏁ら幋鐑藉厴閸欘垯浜掔拋鍧楁６
+	// ???????????????
 	defaultConfig["chat"] = map[string]interface{}{
 		"enabled":    true,
 		"playground": true,
 		"chat":       true,
 	}
 
-	// 閹貉冨煑閸欐澘灏崺?- 閹碘偓閺堝鏁ら幋鐑藉厴閸欘垯浜掔拋鍧楁６
+	// ????????????????
 	defaultConfig["console"] = map[string]interface{}{
 		"enabled":    true,
 		"detail":     true,
@@ -124,7 +116,7 @@ func generateDefaultSidebarConfigForRole(userRole int) string {
 		"task":       true,
 	}
 
-	// 娑擃亙姹夋稉顓炵妇閸栧搫鐓?- 閹碘偓閺堝鏁ら幋鐑藉厴閸欘垯浜掔拋鍧楁６
+	// ?????????????????
 	defaultConfig["personal"] = map[string]interface{}{
 		"enabled":  true,
 		"topup":    true,
@@ -146,6 +138,7 @@ func generateDefaultSidebarConfigForRole(userRole int) string {
 			"setting":      false,
 		}
 	} else if userRole == common.RoleRootUser {
+		// ???????????root ???????????
 		defaultConfig["admin"] = map[string]interface{}{
 			"enabled":      true,
 			"channel":      true,
@@ -159,10 +152,10 @@ func generateDefaultSidebarConfigForRole(userRole int) string {
 			"setting":      true,
 		}
 	}
-	// 閺咁噣鈧氨鏁ら幋铚傜瑝閸栧懎鎯坅dmin閸栧搫鐓?
+
 	configBytes, err := common.Marshal(defaultConfig)
 	if err != nil {
-		common.SysLog("閻㈢喐鍨氭妯款吇鏉堣鐖柊宥囩枂婢惰精瑙? " + err.Error())
+		common.SysLog("failed to marshal default sidebar config: " + err.Error())
 		return ""
 	}
 
@@ -219,7 +212,7 @@ func GetAllUsers(pageInfo *common.PageInfo) (users []*User, total int64, err err
 	}
 
 	// Get paginated users within same transaction
-	err = tx.Unscoped().Order("id desc").Limit(pageInfo.GetPageSize()).Offset(pageInfo.GetStartIdx()).Omit("password").Find(&users).Error
+	err = tx.Unscoped().Order("id desc").Limit(pageInfo.GetPageSize()).Offset(pageInfo.GetStartIdx()).Omit(publicUserOmitFields()...).Find(&users).Error
 	if err != nil {
 		tx.Rollback()
 		return nil, 0, err
@@ -282,7 +275,7 @@ func SearchUsers(keyword string, group string, startIdx int, num int) ([]*User, 
 	}
 
 	// 閼惧嘲褰囬崚鍡涖€夐弫鐗堝祦
-	err = query.Omit("password").Order("id desc").Limit(num).Offset(startIdx).Find(&users).Error
+	err = query.Omit(publicUserOmitFields()...).Order("id desc").Limit(num).Offset(startIdx).Find(&users).Error
 	if err != nil {
 		tx.Rollback()
 		return nil, 0, err
@@ -305,7 +298,7 @@ func GetUserById(id int, selectAll bool) (*User, error) {
 	if selectAll {
 		err = DB.First(&user, "id = ?", id).Error
 	} else {
-		err = DB.Omit("password").First(&user, "id = ?", id).Error
+		err = DB.Omit(publicUserOmitFields()...).First(&user, "id = ?", id).Error
 	}
 	return &user, err
 }
@@ -436,7 +429,7 @@ func (user *User) TransferAffQuotaToQuota(quota int) error {
 		return tx.Error
 	}
 	defer tx.Rollback() // 绾喕绻氶崷銊ュ毐閺佷即鈧偓閸戠儤妞傛禍瀣閼宠棄娲栧?
-	err := tx.Set("gorm:query_option", "FOR UPDATE").First(&user, user.Id).Error
+	err := withRowLock(tx).First(&user, user.Id).Error
 	if err != nil {
 		return err
 	}
@@ -497,6 +490,9 @@ func (user *User) Insert(inviterId int) error {
 
 	if common.QuotaForNewUser > 0 {
 		RecordLog(user.Id, LogTypeSystem, fmt.Sprintf("新用户注册赠送 %s", logger.LogQuota(common.QuotaForNewUser)))
+	}
+	if inviterId != 0 && common.ReferralCommissionEnabled {
+		return nil
 	}
 	if inviterId != 0 {
 		if common.QuotaForInvitee > 0 {
@@ -560,6 +556,9 @@ func (user *User) FinalizeOAuthUserCreation(inviterId int) {
 	if common.QuotaForNewUser > 0 {
 		RecordLog(user.Id, LogTypeSystem, fmt.Sprintf("新用户注册赠送 %s", logger.LogQuota(common.QuotaForNewUser)))
 	}
+	if inviterId != 0 && common.ReferralCommissionEnabled {
+		return
+	}
 	if inviterId != 0 {
 		if common.QuotaForInvitee > 0 {
 			_ = IncreaseUserQuota(user.Id, common.QuotaForInvitee, true)
@@ -581,13 +580,14 @@ func (user *User) Update(updatePassword bool) error {
 		}
 	}
 	newUser := *user
-	DB.First(&user, user.Id)
-	if err = DB.Model(user).Updates(newUser).Error; err != nil {
+	if err = DB.Model(&User{}).Where("id = ?", user.Id).Updates(newUser).Error; err != nil {
 		return err
 	}
-	if err = DB.First(user, user.Id).Error; err != nil {
+	var refreshed User
+	if err = DB.Omit("password").First(&refreshed, user.Id).Error; err != nil {
 		return err
 	}
+	*user = refreshed
 
 	// Update cache
 	return updateUserCache(*user)
@@ -628,13 +628,14 @@ func (user *User) Edit(updatePassword bool) error {
 		updates["password"] = newUser.Password
 	}
 
-	DB.First(&user, user.Id)
-	if err = DB.Model(user).Updates(updates).Error; err != nil {
+	if err = DB.Model(&User{}).Where("id = ?", user.Id).Updates(updates).Error; err != nil {
 		return err
 	}
-	if err = DB.First(user, user.Id).Error; err != nil {
+	var refreshed User
+	if err = DB.Omit("password").First(&refreshed, user.Id).Error; err != nil {
 		return err
 	}
+	*user = refreshed
 
 	// Update cache
 	return updateUserCache(*user)

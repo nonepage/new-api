@@ -411,7 +411,6 @@ func GetSelf(c *gin.Context) {
 
 	// 鑾峰彇鐢ㄦ埛璁剧疆骞舵彁鍙杝idebar_modules
 	userSetting := user.GetSetting()
-	normalizedSetting := common.GetJsonString(userSetting)
 
 	// 鏋勫缓鍝嶅簲鏁版嵁锛屽寘鍚敤鎴蜂俊鎭拰鏉冮檺
 	responseData := map[string]interface{}{
@@ -438,7 +437,7 @@ func GetSelf(c *gin.Context) {
 		"aff_commission_max_recharges": common.ReferralCommissionMaxRecharges,
 		"inviter_id":                   user.InviterId,
 		"linux_do_id":                  user.LinuxDOId,
-		"setting":                      normalizedSetting,
+		"setting":                      user.Setting,
 		"stripe_customer":              user.StripeCustomer,
 		"sidebar_modules":              userSetting.SidebarModules, // 姝ｇ‘鎻愬彇sidebar_modules瀛楁
 		"permissions":                  permissions,                // 鏂板鏉冮檺瀛楁
@@ -1191,7 +1190,7 @@ func UpdateUserSetting(c *gin.Context) {
 		QuotaWarningThreshold:            req.QuotaWarningThreshold,
 		UpstreamModelUpdateNotifyEnabled: upstreamModelUpdateNotifyEnabled,
 		AcceptUnsetRatioModel:            req.AcceptUnsetModelRatioModel,
-		RecordIpLog:                      true,
+		RecordIpLog:                      req.RecordIpLog,
 	}
 
 	// 濡傛灉鏄痺ebhook绫诲瀷,娣诲姞webhook鐩稿叧璁剧疆
