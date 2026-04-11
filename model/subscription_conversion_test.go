@@ -439,3 +439,77 @@ func TestAdminDeleteUserSubscription_FallsBackAfterDeletingLastUpgrade(t *testin
 	require.NoError(t, DB.Model(&UserSubscription{}).Where("id = ?", sub.Id).Count(&count).Error)
 	assert.Zero(t, count)
 }
+
+func TestAdminDeleteUserSubscription_PreservesOriginalFallbackForHigherTier(t *testing.T) {
+	prepareSubscriptionConversionTest(t)
+
+	user := createSubscriptionConversionUser(t, "default", 1000)
+	vipPlan := createSubscriptionConversionPlan(t, "VIP Monthly", 10, "vip")
+	proPlan := createSubscriptionConversionPlan(t, "PRO Monthly", 20, "pro")
+
+	var vipSub *UserSubscription
+	var proSub *UserSubscription
+	require.NoError(t, DB.Transaction(func(tx *gorm.DB) error {
+		var err error
+		vipSub, err = CreateUserSubscriptionFromPlanTx(tx, user.Id, vipPlan, "order")
+		if err != nil {
+			return err
+		}
+		proSub, err = CreateUserSubscriptionFromPlanTx(tx, user.Id, proPlan, "order")
+		return err
+	}))
+	require.NotNil(t, vipSub)
+	require.NotNil(t, proSub)
+
+	var upgraded User
+	require.NoError(t, DB.First(&upgraded, user.Id).Error)
+	assert.Equal(t, "pro", upgraded.Group)
+
+	message, err := AdminDeleteUserSubscription(vipSub.Id)
+	require.NoError(t, err)
+	assert.Empty(t, message)
+
+	var afterVipDelete User
+	require.NoError(t, DB.First(&afterVipDelete, user.Id).Error)
+	assert.Equal(t, "pro", afterVipDelete.Group)
+
+	message, err = AdminDeleteUserSubscription(proSub.Id)
+	require.NoError(t, err)
+	assert.Contains(t, message, "default")
+
+	var finalUser User
+	require.NoError(t, DB.First(&finalUser, user.Id).Error)
+	assert.Equal(t, "default", finalUser.Group)
+}
+
+func TestExecuteSubscriptionWalletConversion_AfterDeletingLowerTierFallsBackToOriginalBaseGroup(t *testing.T) {
+	prepareSubscriptionConversionTest(t)
+
+	user := createSubscriptionConversionUser(t, "default", 1000)
+	vipPlan := createSubscriptionConversionPlan(t, "VIP Monthly", 10, "vip")
+	proPlan := createSubscriptionConversionPlan(t, "PRO Monthly", 20, "pro")
+
+	var vipSub *UserSubscription
+	require.NoError(t, DB.Transaction(func(tx *gorm.DB) error {
+		var err error
+		vipSub, err = CreateUserSubscriptionFromPlanTx(tx, user.Id, vipPlan, "order")
+		if err != nil {
+			return err
+		}
+		_, err = CreateUserSubscriptionFromPlanTx(tx, user.Id, proPlan, "order")
+		return err
+	}))
+	require.NotNil(t, vipSub)
+
+	_, err := AdminDeleteUserSubscription(vipSub.Id)
+	require.NoError(t, err)
+
+	result, err := ExecuteSubscriptionWalletConversion(user.Id, fmt.Sprintf("delete-lower-tier-%d", time.Now().UnixNano()))
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.Equal(t, "default", result.UserGroupAfter)
+
+	var refreshed User
+	require.NoError(t, DB.First(&refreshed, user.Id).Error)
+	assert.Equal(t, "default", refreshed.Group)
+}

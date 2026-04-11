@@ -630,6 +630,23 @@ func syncUserGroupForActiveSubscriptionsTx(tx *gorm.DB, userId int, now int64) (
 	return syncUserGroupForActiveSubscriptionsWithFallbackTx(tx, userId, "", now)
 }
 
+func rewireSubscriptionFallbackChainBeforeDeleteTx(tx *gorm.DB, sub *UserSubscription) error {
+	if sub == nil {
+		return errors.New("sub is nil")
+	}
+	if tx == nil {
+		tx = DB
+	}
+	upgradeGroup := strings.TrimSpace(sub.UpgradeGroup)
+	prevGroup := strings.TrimSpace(sub.PrevUserGroup)
+	if sub.UserId <= 0 || upgradeGroup == "" || prevGroup == "" {
+		return nil
+	}
+	return tx.Model(&UserSubscription{}).
+		Where("user_id = ? AND id <> ? AND prev_user_group = ?", sub.UserId, sub.Id, upgradeGroup).
+		Update("prev_user_group", prevGroup).Error
+}
+
 func CreateUserSubscriptionFromPlanTx(tx *gorm.DB, userId int, plan *SubscriptionPlan, source string) (*UserSubscription, error) {
 	if tx == nil {
 		return nil, errors.New("tx is nil")
@@ -1378,6 +1395,9 @@ func AdminDeleteUserSubscription(userSubscriptionId int) (string, error) {
 			return err
 		}
 		userId = sub.UserId
+		if err := rewireSubscriptionFallbackChainBeforeDeleteTx(tx, &sub); err != nil {
+			return err
+		}
 		if err := tx.Where("id = ?", userSubscriptionId).Delete(&UserSubscription{}).Error; err != nil {
 			return err
 		}
