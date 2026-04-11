@@ -159,7 +159,7 @@ func RequestCreemPay(c *gin.Context) {
 
 	err = c.ShouldBindJSON(&req)
 	if err != nil {
-		c.JSON(200, gin.H{"message": "error", "data": "鍙傛暟閿欒"})
+		c.JSON(200, gin.H{"message": "error", "data": "参数错误"})
 		return
 	}
 	creemAdaptor.RequestPay(c, &req)
@@ -261,7 +261,7 @@ func CreemWebhook(c *gin.Context) {
 	// 瑙ｆ瀽鏂版牸寮忕殑webhook鏁版嵁
 	var webhookEvent CreemWebhookEvent
 	if err := c.ShouldBindJSON(&webhookEvent); err != nil {
-		log.Printf("瑙ｆ瀽Creem Webhook鍙傛暟澶辫触: %v", err)
+		log.Printf("parse Creem webhook payload err: %v", err)
 		c.AbortWithStatus(http.StatusBadRequest)
 		return
 	}
@@ -273,7 +273,7 @@ func CreemWebhook(c *gin.Context) {
 	case "checkout.completed":
 		handleCheckoutCompleted(c, &webhookEvent)
 	default:
-		log.Printf("蹇界暐Creem Webhook浜嬩欢绫诲瀷: %s", webhookEvent.EventType)
+		log.Printf("ignore unsupported Creem webhook event: %s", webhookEvent.EventType)
 		c.Status(http.StatusOK)
 	}
 }

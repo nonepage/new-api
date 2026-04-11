@@ -41,7 +41,7 @@ func authHelper(c *gin.Context, minRole int) {
 		if accessToken == "" {
 			c.JSON(http.StatusUnauthorized, gin.H{
 				"success": false,
-				"message": "鏃犳潈杩涜姝ゆ搷浣滐紝鏈櫥褰曚笖鏈彁渚?access token",
+				"message": "无权进行此操作，未登录且未提供 access token",
 			})
 			c.Abort()
 			return
@@ -51,7 +51,7 @@ func authHelper(c *gin.Context, minRole int) {
 			if !validUserInfo(user.Username, user.Role) {
 				c.JSON(http.StatusOK, gin.H{
 					"success": false,
-					"message": "鏃犳潈杩涜姝ゆ搷浣滐紝鐢ㄦ埛淇℃伅鏃犳晥",
+					"message": "无权进行此操作，用户信息无效",
 				})
 				c.Abort()
 				return
@@ -62,7 +62,7 @@ func authHelper(c *gin.Context, minRole int) {
 		} else {
 			c.JSON(http.StatusOK, gin.H{
 				"success": false,
-				"message": "鏃犳潈杩涜姝ゆ搷浣滐紝access token 鏃犳晥",
+				"message": "无权进行此操作，access token 无效",
 			})
 			c.Abort()
 			return
@@ -73,7 +73,7 @@ func authHelper(c *gin.Context, minRole int) {
 	if apiUserIdStr == "" {
 		c.JSON(http.StatusUnauthorized, gin.H{
 			"success": false,
-			"message": "鏃犳潈杩涜姝ゆ搷浣滐紝鏈彁渚?New-Api-User",
+			"message": "无权进行此操作，未提供 New-Api-User",
 		})
 		c.Abort()
 		return
@@ -82,7 +82,7 @@ func authHelper(c *gin.Context, minRole int) {
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{
 			"success": false,
-			"message": "鏃犳潈杩涜姝ゆ搷浣滐紝New-Api-User 鏍煎紡閿欒",
+			"message": "无权进行此操作，New-Api-User 格式错误",
 		})
 		c.Abort()
 		return
@@ -90,7 +90,7 @@ func authHelper(c *gin.Context, minRole int) {
 	if id != apiUserId {
 		c.JSON(http.StatusUnauthorized, gin.H{
 			"success": false,
-			"message": "鏃犳潈杩涜姝ゆ搷浣滐紝New-Api-User 涓庣櫥褰曠敤鎴蜂笉鍖归厤",
+			"message": "无权进行此操作，New-Api-User 与登录用户不匹配",
 		})
 		c.Abort()
 		return
@@ -108,7 +108,7 @@ func authHelper(c *gin.Context, minRole int) {
 	if userCache.Status == common.UserStatusDisabled {
 		c.JSON(http.StatusOK, gin.H{
 			"success": false,
-			"message": "鐢ㄦ埛宸茶灏佺",
+				"message": "用户已被封禁",
 		})
 		c.Abort()
 		return
@@ -116,7 +116,7 @@ func authHelper(c *gin.Context, minRole int) {
 	if userCache.Role < minRole {
 		c.JSON(http.StatusOK, gin.H{
 			"success": false,
-			"message": "鏃犳潈杩涜姝ゆ搷浣滐紝鏉冮檺涓嶈冻",
+				"message": "无权进行此操作，权限不足",
 		})
 		c.Abort()
 		return
@@ -124,7 +124,7 @@ func authHelper(c *gin.Context, minRole int) {
 	if !validUserInfo(userCache.Username, userCache.Role) {
 		c.JSON(http.StatusOK, gin.H{
 			"success": false,
-			"message": "鏃犳潈杩涜姝ゆ搷浣滐紝鐢ㄦ埛淇℃伅鏃犳晥",
+				"message": "无权进行此操作，用户信息无效",
 		})
 		c.Abort()
 		return
@@ -259,7 +259,7 @@ func TokenAuthReadOnly() func(c *gin.Context) {
 		if userCache.Status != common.UserStatusEnabled {
 			c.JSON(http.StatusForbidden, gin.H{
 				"success": false,
-				"message": "鐢ㄦ埛宸茶灏佺",
+				"message": "用户已被封禁",
 			})
 			c.Abort()
 			return
@@ -346,11 +346,11 @@ func TokenAuth() func(c *gin.Context) {
 			logger.LogDebug(c, "Token has IP restrictions, checking client IP %s", clientIp)
 			ip := net.ParseIP(clientIp)
 			if ip == nil {
-				abortWithOpenAiMessage(c, http.StatusForbidden, "鏃犳硶瑙ｆ瀽瀹㈡埛绔?IP 鍦板潃")
+				abortWithOpenAiMessage(c, http.StatusForbidden, "无法解析客户端 IP 地址")
 				return
 			}
 			if common.IsIpInCIDRList(ip, allowIps) == false {
-				abortWithOpenAiMessage(c, http.StatusForbidden, "鎮ㄧ殑 IP 涓嶅湪浠ょ墝鍏佽璁块棶鐨勫垪琛ㄤ腑", types.ErrorCodeAccessDenied)
+				abortWithOpenAiMessage(c, http.StatusForbidden, "您的 IP 不在令牌允许访问的列表中", types.ErrorCodeAccessDenied)
 				return
 			}
 			logger.LogDebug(c, "Client IP %s passed the token IP restrictions check", clientIp)
@@ -363,7 +363,7 @@ func TokenAuth() func(c *gin.Context) {
 		}
 		userEnabled := userCache.Status == common.UserStatusEnabled
 		if !userEnabled {
-			abortWithOpenAiMessage(c, http.StatusForbidden, "鐢ㄦ埛宸茶灏佺")
+			abortWithOpenAiMessage(c, http.StatusForbidden, "用户已被封禁")
 			return
 		}
 
@@ -374,13 +374,13 @@ func TokenAuth() func(c *gin.Context) {
 		if tokenGroup != "" {
 			// check common.UserUsableGroups[userGroup]
 			if _, ok := service.GetUserUsableGroups(userGroup)[tokenGroup]; !ok {
-				abortWithOpenAiMessage(c, http.StatusForbidden, fmt.Sprintf("鏃犳潈璁块棶 %s 鍒嗙粍", tokenGroup))
+				abortWithOpenAiMessage(c, http.StatusForbidden, fmt.Sprintf("无权访问 %s 分组", tokenGroup))
 				return
 			}
 			// check group in common.GroupRatio
 			if !ratio_setting.ContainsGroupRatio(tokenGroup) {
 				if tokenGroup != "auto" {
-					abortWithOpenAiMessage(c, http.StatusForbidden, fmt.Sprintf("鍒嗙粍 %s 宸茶寮冪敤", tokenGroup))
+					abortWithOpenAiMessage(c, http.StatusForbidden, fmt.Sprintf("分组 %s 已被弃用", tokenGroup))
 					return
 				}
 			}
@@ -421,8 +421,8 @@ func SetupContextForToken(c *gin.Context, token *model.Token, parts ...string) e
 			c.Set("specific_channel_id", parts[1])
 		} else {
 			c.Header("specific_channel_version", "701e3ae1dc3f7975556d354e0675168d004891c8")
-			abortWithOpenAiMessage(c, http.StatusForbidden, "鏅€氱敤鎴蜂笉鏀寔鎸囧畾娓犻亾")
-			return fmt.Errorf("鏅€氱敤鎴蜂笉鏀寔鎸囧畾娓犻亾")
+			abortWithOpenAiMessage(c, http.StatusForbidden, "普通用户不支持指定渠道")
+			return fmt.Errorf("普通用户不支持指定渠道")
 		}
 	}
 	return nil
