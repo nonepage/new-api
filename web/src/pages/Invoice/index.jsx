@@ -8,6 +8,7 @@ import {
   Input,
   Modal,
   Select,
+  Tag,
   Table,
   Tabs,
   Typography,

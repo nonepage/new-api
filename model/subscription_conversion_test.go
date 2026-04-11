@@ -408,3 +408,34 @@ func TestExecuteSubscriptionWalletConversion_PreservesNonDefaultBaseGroup(t *tes
 	require.NoError(t, DB.First(&refreshed, user.Id).Error)
 	assert.Equal(t, "staff", refreshed.Group)
 }
+
+func TestAdminDeleteUserSubscription_FallsBackAfterDeletingLastUpgrade(t *testing.T) {
+	prepareSubscriptionConversionTest(t)
+
+	user := createSubscriptionConversionUser(t, "default", 1000)
+	plan := createSubscriptionConversionPlan(t, "VIP Monthly", 10, "vip")
+
+	var sub *UserSubscription
+	require.NoError(t, DB.Transaction(func(tx *gorm.DB) error {
+		var err error
+		sub, err = CreateUserSubscriptionFromPlanTx(tx, user.Id, plan, "order")
+		return err
+	}))
+	require.NotNil(t, sub)
+
+	var upgraded User
+	require.NoError(t, DB.First(&upgraded, user.Id).Error)
+	assert.Equal(t, "vip", upgraded.Group)
+
+	message, err := AdminDeleteUserSubscription(sub.Id)
+	require.NoError(t, err)
+	assert.Contains(t, message, "default")
+
+	var refreshed User
+	require.NoError(t, DB.First(&refreshed, user.Id).Error)
+	assert.Equal(t, "default", refreshed.Group)
+
+	var count int64
+	require.NoError(t, DB.Model(&UserSubscription{}).Where("id = ?", sub.Id).Count(&count).Error)
+	assert.Zero(t, count)
+}

@@ -591,7 +591,7 @@ func resolveUserGroupByActiveSubscriptionsTx(tx *gorm.DB, userId int, fallbackGr
 	return targetGroup, nil
 }
 
-func syncUserGroupForActiveSubscriptionsTx(tx *gorm.DB, userId int, now int64) (string, bool, error) {
+func syncUserGroupForActiveSubscriptionsWithFallbackTx(tx *gorm.DB, userId int, fallbackGroup string, now int64) (string, bool, error) {
 	if userId <= 0 {
 		return "", false, errors.New("invalid userId")
 	}
@@ -602,9 +602,16 @@ func syncUserGroupForActiveSubscriptionsTx(tx *gorm.DB, userId int, now int64) (
 	if err != nil {
 		return "", false, err
 	}
-	targetGroup, err := resolveUserGroupByActiveSubscriptionsTx(tx, userId, currentGroup, now)
+	fallbackGroup = strings.TrimSpace(fallbackGroup)
+	if fallbackGroup == "" {
+		fallbackGroup = currentGroup
+	}
+	targetGroup, err := resolveUserGroupByActiveSubscriptionsTx(tx, userId, fallbackGroup, now)
 	if err != nil {
 		return "", false, err
+	}
+	if targetGroup == "" {
+		targetGroup = fallbackGroup
 	}
 	if targetGroup == "" {
 		targetGroup = strings.TrimSpace(currentGroup)
@@ -617,6 +624,10 @@ func syncUserGroupForActiveSubscriptionsTx(tx *gorm.DB, userId int, now int64) (
 		return "", false, err
 	}
 	return targetGroup, true, nil
+}
+
+func syncUserGroupForActiveSubscriptionsTx(tx *gorm.DB, userId int, now int64) (string, bool, error) {
+	return syncUserGroupForActiveSubscriptionsWithFallbackTx(tx, userId, "", now)
 }
 
 func CreateUserSubscriptionFromPlanTx(tx *gorm.DB, userId int, plan *SubscriptionPlan, source string) (*UserSubscription, error) {
@@ -1367,16 +1378,16 @@ func AdminDeleteUserSubscription(userSubscriptionId int) (string, error) {
 			return err
 		}
 		userId = sub.UserId
-		target, changed, err := syncUserGroupForActiveSubscriptionsTx(tx, sub.UserId, now)
+		if err := tx.Where("id = ?", userSubscriptionId).Delete(&UserSubscription{}).Error; err != nil {
+			return err
+		}
+		target, changed, err := syncUserGroupForActiveSubscriptionsWithFallbackTx(tx, sub.UserId, sub.PrevUserGroup, now)
 		if err != nil {
 			return err
 		}
 		if changed {
 			cacheGroup = target
 			downgradeGroup = target
-		}
-		if err := tx.Where("id = ?", userSubscriptionId).Delete(&UserSubscription{}).Error; err != nil {
-			return err
 		}
 		return nil
 	})
