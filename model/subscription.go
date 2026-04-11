@@ -647,7 +647,7 @@ func rewireSubscriptionFallbackChainBeforeDeleteTx(tx *gorm.DB, sub *UserSubscri
 		Update("prev_user_group", prevGroup).Error
 }
 
-func CreateUserSubscriptionFromPlanTx(tx *gorm.DB, userId int, plan *SubscriptionPlan, source string) (*UserSubscription, error) {
+func createUserSubscriptionFromPlanTx(tx *gorm.DB, userId int, plan *SubscriptionPlan, source string, purchasePriceAmount float64, purchaseCurrency string) (*UserSubscription, error) {
 	if tx == nil {
 		return nil, errors.New("tx is nil")
 	}
@@ -682,10 +682,12 @@ func CreateUserSubscriptionFromPlanTx(tx *gorm.DB, userId int, plan *Subscriptio
 	}
 	upgradeGroup := strings.TrimSpace(plan.UpgradeGroup)
 	prevGroup := ""
-	purchasePriceAmount := 0.0
-	purchaseCurrency := strings.TrimSpace(plan.Currency)
-	if source == "order" {
-		purchasePriceAmount = plan.PriceAmount
+	purchaseCurrency = strings.TrimSpace(purchaseCurrency)
+	if purchaseCurrency == "" {
+		purchaseCurrency = strings.TrimSpace(plan.Currency)
+	}
+	if purchasePriceAmount < 0 {
+		purchasePriceAmount = 0
 	}
 	if upgradeGroup != "" {
 		currentGroup, err := getUserGroupByIdTx(tx, userId)
@@ -729,6 +731,15 @@ func CreateUserSubscriptionFromPlanTx(tx *gorm.DB, userId int, plan *Subscriptio
 	return sub, nil
 }
 
+func CreateUserSubscriptionFromPlanTx(tx *gorm.DB, userId int, plan *SubscriptionPlan, source string) (*UserSubscription, error) {
+	purchasePriceAmount := 0.0
+	purchaseCurrency := strings.TrimSpace(plan.Currency)
+	if source == "order" {
+		purchasePriceAmount = plan.PriceAmount
+	}
+	return createUserSubscriptionFromPlanTx(tx, userId, plan, source, purchasePriceAmount, purchaseCurrency)
+}
+
 // Complete a subscription order (idempotent). Creates a UserSubscription snapshot from the plan.
 func CompleteSubscriptionOrder(tradeNo string, providerPayload string) error {
 	if tradeNo == "" {
@@ -755,7 +766,7 @@ func CompleteSubscriptionOrder(tradeNo string, providerPayload string) error {
 		if order.Status != common.TopUpStatusPending {
 			return ErrSubscriptionOrderStatusInvalid
 		}
-		plan, err := GetSubscriptionPlanById(order.PlanId)
+		plan, err := getSubscriptionPlanByIdTx(tx, order.PlanId)
 		if err != nil {
 			return err
 		}
@@ -763,7 +774,12 @@ func CompleteSubscriptionOrder(tradeNo string, providerPayload string) error {
 			// still allow completion for already purchased orders
 		}
 		upgradeGroup = strings.TrimSpace(plan.UpgradeGroup)
-		_, err = CreateUserSubscriptionFromPlanTx(tx, order.UserId, plan, "order")
+		purchasePriceAmount := order.PaidAmount
+		if purchasePriceAmount == 0 {
+			purchasePriceAmount = order.Money
+		}
+		purchaseCurrency := strings.TrimSpace(order.PaidCurrency)
+		_, err = createUserSubscriptionFromPlanTx(tx, order.UserId, plan, "order", purchasePriceAmount, purchaseCurrency)
 		if err != nil {
 			return err
 		}

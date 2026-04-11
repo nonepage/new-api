@@ -24,6 +24,7 @@ func prepareSubscriptionConversionTest(t *testing.T) {
 		}{
 			{name: "SubscriptionPlan", model: &SubscriptionPlan{}},
 			{name: "SubscriptionOrder", model: &SubscriptionOrder{}},
+			{name: "TopUp", model: &TopUp{}},
 			{name: "UserSubscription", model: &UserSubscription{}},
 			{name: "SubscriptionPreConsumeRecord", model: &SubscriptionPreConsumeRecord{}},
 			{name: "SubscriptionConversionBatch", model: &SubscriptionConversionBatch{}},
@@ -39,6 +40,7 @@ func prepareSubscriptionConversionTest(t *testing.T) {
 		DB.Exec("DELETE FROM subscription_pre_consume_records")
 		DB.Exec("DELETE FROM user_subscriptions")
 		DB.Exec("DELETE FROM subscription_orders")
+		DB.Exec("DELETE FROM top_ups")
 		DB.Exec("DELETE FROM subscription_plans")
 		DB.Exec("DELETE FROM logs")
 		DB.Exec("DELETE FROM users")
@@ -281,6 +283,50 @@ func TestPreviewSubscriptionWalletConversion_FallsBackToCurrentPlanPriceWithoutS
 	assert.Equal(t, "USD", item.Currency)
 	assert.InDelta(t, 20.0, item.RefundMoney, 0.5)
 	assert.Positive(t, item.RefundQuota)
+}
+
+func TestExecuteSubscriptionWalletConversion_UsesOrderPaidSnapshotWhenPlanPriceIsZero(t *testing.T) {
+	prepareSubscriptionConversionTest(t)
+	originalRedisEnabled := common.RedisEnabled
+	common.RedisEnabled = false
+	t.Cleanup(func() {
+		common.RedisEnabled = originalRedisEnabled
+	})
+
+	user := createSubscriptionConversionUser(t, "default", 1000)
+	plan := createSubscriptionConversionPlan(t, "Zero Price Display Plan", 0, "vip")
+	order := &SubscriptionOrder{
+		UserId:        user.Id,
+		PlanId:        plan.Id,
+		Money:         9.9,
+		PaidAmount:    9.9,
+		PaidCurrency:  "USD",
+		TradeNo:       fmt.Sprintf("sub-order-%d", time.Now().UnixNano()),
+		PaymentMethod: "stripe",
+		Status:        common.TopUpStatusPending,
+		CreateTime:    common.GetTimestamp(),
+	}
+	require.NoError(t, DB.Create(order).Error)
+	require.NoError(t, CompleteSubscriptionOrder(order.TradeNo, ""))
+
+	preview, err := PreviewSubscriptionWalletConversion(user.Id)
+	require.NoError(t, err)
+	require.NotNil(t, preview)
+	require.Len(t, preview.Items, 1)
+
+	item := preview.Items[0]
+	assert.Equal(t, 9.9, item.PriceAmount)
+	assert.Equal(t, "USD", item.Currency)
+	assert.Positive(t, item.RefundMoney)
+	assert.Positive(t, item.RefundQuota)
+
+	result, err := ExecuteSubscriptionWalletConversion(user.Id, fmt.Sprintf("paid-snapshot-%d", time.Now().UnixNano()))
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.Positive(t, result.TotalRefundMoney)
+	assert.Positive(t, result.TotalRefundQuota)
+	assert.Equal(t, "default", result.UserGroupAfter)
+	assert.Equal(t, user.Quota+int(result.TotalRefundQuota), result.NewUserQuota)
 }
 
 func TestExecuteSubscriptionWalletConversion_AdminSubscriptionDoesNotRefund(t *testing.T) {
