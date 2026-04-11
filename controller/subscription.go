@@ -97,7 +97,7 @@ func ConvertSubscriptionToWallet(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
-	if err := syncSubscriptionConversionSession(c, "default"); err != nil {
+	if err := syncSubscriptionConversionSession(c, result.UserGroupAfter); err != nil {
 		common.ApiError(c, err)
 		return
 	}

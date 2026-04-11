@@ -10,7 +10,6 @@ import {
   Select,
   Table,
   Tabs,
-  Tag,
   Typography,
 } from '@douyinfe/semi-ui';
 import { useTranslation } from 'react-i18next';
@@ -25,6 +24,7 @@ import {
 } from './invoiceShared';
 
 const { TabPane } = Tabs;
+const DEFAULT_PAGE_SIZE = 20;
 
 const defaultProfileForm = {
   type: 'personal',
@@ -51,37 +51,75 @@ const InvoicePage = () => {
   const [applications, setApplications] = useState([]);
   const [records, setRecords] = useState([]);
   const [profiles, setProfiles] = useState([]);
+  const [ordersPage, setOrdersPage] = useState(1);
+  const [ordersPageSize, setOrdersPageSize] = useState(DEFAULT_PAGE_SIZE);
+  const [ordersTotal, setOrdersTotal] = useState(0);
+  const [applicationsPage, setApplicationsPage] = useState(1);
+  const [applicationsPageSize, setApplicationsPageSize] =
+    useState(DEFAULT_PAGE_SIZE);
+  const [applicationsTotal, setApplicationsTotal] = useState(0);
+  const [recordsPage, setRecordsPage] = useState(1);
+  const [recordsPageSize, setRecordsPageSize] = useState(DEFAULT_PAGE_SIZE);
+  const [recordsTotal, setRecordsTotal] = useState(0);
   const [selectedOrderIds, setSelectedOrderIds] = useState([]);
   const [selectedProfileId, setSelectedProfileId] = useState(undefined);
   const [applicationRemark, setApplicationRemark] = useState('');
   const [profileForm, setProfileForm] = useState(defaultProfileForm);
   const [detailApplication, setDetailApplication] = useState(null);
 
-  const loadData = async () => {
+  const loadData = async ({
+    nextOrdersPage = ordersPage,
+    nextOrdersPageSize = ordersPageSize,
+    nextApplicationsPage = applicationsPage,
+    nextApplicationsPageSize = applicationsPageSize,
+    nextRecordsPage = recordsPage,
+    nextRecordsPageSize = recordsPageSize,
+  } = {}) => {
     setLoading(true);
     try {
       const [ordersRes, applicationsRes, recordsRes, profilesRes] =
         await Promise.all([
           API.get('/api/invoice/order/self', {
-            params: { p: 1, page_size: 100 },
+            params: {
+              p: nextOrdersPage,
+              page_size: nextOrdersPageSize,
+            },
           }),
           API.get('/api/invoice/application/self', {
-            params: { p: 1, page_size: 100 },
+            params: {
+              p: nextApplicationsPage,
+              page_size: nextApplicationsPageSize,
+            },
           }),
           API.get('/api/invoice/record/self', {
-            params: { p: 1, page_size: 100 },
+            params: {
+              p: nextRecordsPage,
+              page_size: nextRecordsPageSize,
+            },
           }),
           API.get('/api/invoice/profile'),
         ]);
 
       if (ordersRes.data.success) {
-        setAvailableOrders(ordersRes.data.data.items || []);
+        const payload = ordersRes.data.data || {};
+        setAvailableOrders(payload.items || []);
+        setOrdersTotal(payload.total || 0);
+        setOrdersPage(payload.page || nextOrdersPage);
+        setOrdersPageSize(payload.page_size || nextOrdersPageSize);
       }
       if (applicationsRes.data.success) {
-        setApplications(applicationsRes.data.data.items || []);
+        const payload = applicationsRes.data.data || {};
+        setApplications(payload.items || []);
+        setApplicationsTotal(payload.total || 0);
+        setApplicationsPage(payload.page || nextApplicationsPage);
+        setApplicationsPageSize(payload.page_size || nextApplicationsPageSize);
       }
       if (recordsRes.data.success) {
-        setRecords(recordsRes.data.data.items || []);
+        const payload = recordsRes.data.data || {};
+        setRecords(payload.items || []);
+        setRecordsTotal(payload.total || 0);
+        setRecordsPage(payload.page || nextRecordsPage);
+        setRecordsPageSize(payload.page_size || nextRecordsPageSize);
       }
       if (profilesRes.data.success) {
         const nextProfiles = profilesRes.data.data || [];
@@ -230,7 +268,7 @@ const InvoicePage = () => {
       {
         title: t('状态'),
         dataIndex: 'status',
-        render: (value) => <Tag color='green'>{value}</Tag>,
+        render: (value) => renderInvoiceStatusTag(value, t),
       },
       {
         title: t('金额'),
@@ -415,7 +453,7 @@ const InvoicePage = () => {
               >
                 {t('提交开票申请')}
               </Button>
-              <Button onClick={loadData}>{t('刷新')}</Button>
+              <Button onClick={() => loadData()}>{t('刷新')}</Button>
             </div>
 
             {!selectedProfileId && (
@@ -467,7 +505,22 @@ const InvoicePage = () => {
               columns={orderColumns}
               dataSource={availableOrders}
               rowSelection={rowSelection}
-              pagination={false}
+              pagination={{
+                currentPage: ordersPage,
+                pageSize: ordersPageSize,
+                total: ordersTotal,
+                showSizeChanger: true,
+                pageSizeOpts: [10, 20, 50, 100],
+                onPageChange: (page) => {
+                  loadData({ nextOrdersPage: page });
+                },
+                onPageSizeChange: (pageSize) => {
+                  loadData({
+                    nextOrdersPage: 1,
+                    nextOrdersPageSize: pageSize,
+                  });
+                },
+              }}
               empty={
                 <Empty
                   title={t('暂无可开票订单')}
@@ -491,7 +544,22 @@ const InvoicePage = () => {
               rowKey='id'
               columns={applicationColumns}
               dataSource={applications}
-              pagination={false}
+              pagination={{
+                currentPage: applicationsPage,
+                pageSize: applicationsPageSize,
+                total: applicationsTotal,
+                showSizeChanger: true,
+                pageSizeOpts: [10, 20, 50, 100],
+                onPageChange: (page) => {
+                  loadData({ nextApplicationsPage: page });
+                },
+                onPageSizeChange: (pageSize) => {
+                  loadData({
+                    nextApplicationsPage: 1,
+                    nextApplicationsPageSize: pageSize,
+                  });
+                },
+              }}
               empty={<Empty title={t('暂无申请记录')} />}
             />
           </Card>
@@ -501,7 +569,22 @@ const InvoicePage = () => {
               rowKey='id'
               columns={recordColumns}
               dataSource={records}
-              pagination={false}
+              pagination={{
+                currentPage: recordsPage,
+                pageSize: recordsPageSize,
+                total: recordsTotal,
+                showSizeChanger: true,
+                pageSizeOpts: [10, 20, 50, 100],
+                onPageChange: (page) => {
+                  loadData({ nextRecordsPage: page });
+                },
+                onPageSizeChange: (pageSize) => {
+                  loadData({
+                    nextRecordsPage: 1,
+                    nextRecordsPageSize: pageSize,
+                  });
+                },
+              }}
               empty={<Empty title={t('暂无开票记录')} />}
             />
           </Card>

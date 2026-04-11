@@ -9,6 +9,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 )
 
 var subscriptionConversionTestMigrateOnce sync.Once
@@ -274,4 +275,136 @@ func TestExecuteSubscriptionWalletConversion_AdminSubscriptionDoesNotRefund(t *t
 	assert.EqualValues(t, 0, result.TotalRefundQuota)
 	assert.Equal(t, 0.0, result.TotalRefundMoney)
 	assert.Equal(t, user.Quota, result.NewUserQuota)
+}
+
+func TestCreateUserSubscriptionFromPlanTx_DuplicateUpgradeKeepsFallbackPreviousGroup(t *testing.T) {
+	prepareSubscriptionConversionTest(t)
+
+	user := createSubscriptionConversionUser(t, "default", 1000)
+	plan := createSubscriptionConversionPlan(t, "VIP Monthly", 10, "vip")
+
+	require.NoError(t, DB.Transaction(func(tx *gorm.DB) error {
+		if _, err := CreateUserSubscriptionFromPlanTx(tx, user.Id, plan, "order"); err != nil {
+			return err
+		}
+		_, err := CreateUserSubscriptionFromPlanTx(tx, user.Id, plan, "order")
+		return err
+	}))
+
+	var subs []UserSubscription
+	require.NoError(t, DB.Where("user_id = ?", user.Id).Order("id asc").Find(&subs).Error)
+	require.Len(t, subs, 2)
+	assert.Equal(t, "default", subs[0].PrevUserGroup)
+	assert.Equal(t, "default", subs[1].PrevUserGroup)
+
+	var refreshed User
+	require.NoError(t, DB.First(&refreshed, user.Id).Error)
+	assert.Equal(t, "vip", refreshed.Group)
+}
+
+func TestExpireDueSubscriptions_StackedSameUpgradeFallsBackToOriginalGroup(t *testing.T) {
+	prepareSubscriptionConversionTest(t)
+
+	user := createSubscriptionConversionUser(t, "default", 1000)
+	plan := createSubscriptionConversionPlan(t, "VIP Monthly", 10, "vip")
+
+	require.NoError(t, DB.Transaction(func(tx *gorm.DB) error {
+		if _, err := CreateUserSubscriptionFromPlanTx(tx, user.Id, plan, "order"); err != nil {
+			return err
+		}
+		_, err := CreateUserSubscriptionFromPlanTx(tx, user.Id, plan, "order")
+		return err
+	}))
+
+	var subs []UserSubscription
+	require.NoError(t, DB.Where("user_id = ?", user.Id).Order("id asc").Find(&subs).Error)
+	require.Len(t, subs, 2)
+
+	now := common.GetTimestamp()
+	require.NoError(t, DB.Model(&UserSubscription{}).Where("id = ?", subs[0].Id).Update("end_time", now-10).Error)
+	require.NoError(t, DB.Model(&UserSubscription{}).Where("id = ?", subs[1].Id).Update("end_time", now+3600).Error)
+
+	expiredCount, err := ExpireDueSubscriptions(10)
+	require.NoError(t, err)
+	assert.Equal(t, 1, expiredCount)
+
+	var midUser User
+	require.NoError(t, DB.First(&midUser, user.Id).Error)
+	assert.Equal(t, "vip", midUser.Group)
+
+	require.NoError(t, DB.Model(&UserSubscription{}).Where("id = ?", subs[1].Id).Update("end_time", common.GetTimestamp()-1).Error)
+
+	expiredCount, err = ExpireDueSubscriptions(10)
+	require.NoError(t, err)
+	assert.Equal(t, 1, expiredCount)
+
+	var finalUser User
+	require.NoError(t, DB.First(&finalUser, user.Id).Error)
+	assert.Equal(t, "default", finalUser.Group)
+}
+
+func TestExpireDueSubscriptions_MultiLevelUpgradeFallsBackToLowerActiveGroup(t *testing.T) {
+	prepareSubscriptionConversionTest(t)
+
+	user := createSubscriptionConversionUser(t, "default", 1000)
+	vipPlan := createSubscriptionConversionPlan(t, "VIP Monthly", 10, "vip")
+	proPlan := createSubscriptionConversionPlan(t, "PRO Monthly", 20, "pro")
+
+	require.NoError(t, DB.Transaction(func(tx *gorm.DB) error {
+		if _, err := CreateUserSubscriptionFromPlanTx(tx, user.Id, vipPlan, "order"); err != nil {
+			return err
+		}
+		_, err := CreateUserSubscriptionFromPlanTx(tx, user.Id, proPlan, "order")
+		return err
+	}))
+
+	var subs []UserSubscription
+	require.NoError(t, DB.Where("user_id = ?", user.Id).Order("id asc").Find(&subs).Error)
+	require.Len(t, subs, 2)
+
+	now := common.GetTimestamp()
+	require.NoError(t, DB.Model(&UserSubscription{}).Where("plan_id = ?", vipPlan.Id).Update("end_time", now+3600).Error)
+	require.NoError(t, DB.Model(&UserSubscription{}).Where("plan_id = ?", proPlan.Id).Update("end_time", now-1).Error)
+
+	expiredCount, err := ExpireDueSubscriptions(10)
+	require.NoError(t, err)
+	assert.Equal(t, 1, expiredCount)
+
+	var midUser User
+	require.NoError(t, DB.First(&midUser, user.Id).Error)
+	assert.Equal(t, "vip", midUser.Group)
+
+	require.NoError(t, DB.Model(&UserSubscription{}).Where("plan_id = ?", vipPlan.Id).Update("end_time", common.GetTimestamp()-1).Error)
+
+	expiredCount, err = ExpireDueSubscriptions(10)
+	require.NoError(t, err)
+	assert.Equal(t, 1, expiredCount)
+
+	var finalUser User
+	require.NoError(t, DB.First(&finalUser, user.Id).Error)
+	assert.Equal(t, "default", finalUser.Group)
+}
+
+func TestExecuteSubscriptionWalletConversion_PreservesNonDefaultBaseGroup(t *testing.T) {
+	prepareSubscriptionConversionTest(t)
+
+	user := createSubscriptionConversionUser(t, "staff", 1000)
+	plan := createSubscriptionConversionPlan(t, "VIP Monthly", 10, "vip")
+
+	require.NoError(t, DB.Transaction(func(tx *gorm.DB) error {
+		if _, err := CreateUserSubscriptionFromPlanTx(tx, user.Id, plan, "order"); err != nil {
+			return err
+		}
+		_, err := CreateUserSubscriptionFromPlanTx(tx, user.Id, plan, "order")
+		return err
+	}))
+
+	result, err := ExecuteSubscriptionWalletConversion(user.Id, fmt.Sprintf("staff-req-%d", time.Now().UnixNano()))
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.Equal(t, "staff", result.UserGroupAfter)
+
+	var refreshed User
+	require.NoError(t, DB.First(&refreshed, user.Id).Error)
+	assert.Equal(t, "staff", refreshed.Group)
 }
