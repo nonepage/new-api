@@ -1055,11 +1055,11 @@ func listActiveUserSubscriptionsWithPlansTx(tx *gorm.DB, userId int, now int64) 
 }
 
 func getSubscriptionRefundBase(sub UserSubscription, plan SubscriptionPlan) (float64, string) {
+	if sub.Source == "admin" && sub.PurchasePriceAmount == 0 {
+		return plan.PriceAmount, strings.TrimSpace(plan.Currency)
+	}
 	if sub.PurchasePriceAmount > 0 || sub.PurchaseCurrency != "" {
 		return sub.PurchasePriceAmount, strings.TrimSpace(sub.PurchaseCurrency)
-	}
-	if sub.Source == "admin" {
-		return 0, strings.TrimSpace(plan.Currency)
 	}
 	return plan.PriceAmount, strings.TrimSpace(plan.Currency)
 }

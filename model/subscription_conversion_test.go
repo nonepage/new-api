@@ -329,7 +329,7 @@ func TestExecuteSubscriptionWalletConversion_UsesOrderPaidSnapshotWhenPlanPriceI
 	assert.Equal(t, user.Quota+int(result.TotalRefundQuota), result.NewUserQuota)
 }
 
-func TestExecuteSubscriptionWalletConversion_AdminSubscriptionDoesNotRefund(t *testing.T) {
+func TestExecuteSubscriptionWalletConversion_AdminSubscriptionFallsBackToPlanPrice(t *testing.T) {
 	prepareSubscriptionConversionTest(t)
 
 	user := createSubscriptionConversionUser(t, "vip", 1000)
@@ -352,9 +352,37 @@ func TestExecuteSubscriptionWalletConversion_AdminSubscriptionDoesNotRefund(t *t
 	require.NotNil(t, result)
 
 	assert.Equal(t, 1, result.SubscriptionCount)
-	assert.EqualValues(t, 0, result.TotalRefundQuota)
-	assert.Equal(t, 0.0, result.TotalRefundMoney)
-	assert.Equal(t, user.Quota, result.NewUserQuota)
+	assert.Positive(t, result.TotalRefundQuota)
+	assert.Positive(t, result.TotalRefundMoney)
+	assert.Equal(t, user.Quota+int(result.TotalRefundQuota), result.NewUserQuota)
+}
+
+func TestAdminBindSubscription_ConversionFallsBackToPlanPrice(t *testing.T) {
+	prepareSubscriptionConversionTest(t)
+	originalRedisEnabled := common.RedisEnabled
+	common.RedisEnabled = false
+	t.Cleanup(func() {
+		common.RedisEnabled = originalRedisEnabled
+	})
+
+	user := createSubscriptionConversionUser(t, "default", 1000)
+	plan := createSubscriptionConversionPlan(t, "Admin Bound", 15, "vip")
+
+	_, err := AdminBindSubscription(user.Id, plan.Id, "")
+	require.NoError(t, err)
+
+	preview, err := PreviewSubscriptionWalletConversion(user.Id)
+	require.NoError(t, err)
+	require.NotNil(t, preview)
+	require.Len(t, preview.Items, 1)
+	assert.Positive(t, preview.Items[0].RefundMoney)
+	assert.Positive(t, preview.Items[0].RefundQuota)
+
+	result, err := ExecuteSubscriptionWalletConversion(user.Id, fmt.Sprintf("admin-bind-%d", time.Now().UnixNano()))
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.Positive(t, result.TotalRefundMoney)
+	assert.Positive(t, result.TotalRefundQuota)
 }
 
 func TestCreateUserSubscriptionFromPlanTx_DuplicateUpgradeKeepsFallbackPreviousGroup(t *testing.T) {
