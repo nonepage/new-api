@@ -253,6 +253,9 @@ type UserSubscription struct {
 	AmountTotal int64 `json:"amount_total" gorm:"type:bigint;not null;default:0"`
 	AmountUsed  int64 `json:"amount_used" gorm:"type:bigint;not null;default:0"`
 
+	PurchasePriceAmount float64 `json:"purchase_price_amount" gorm:"type:decimal(10,6);not null;default:0"`
+	PurchaseCurrency    string  `json:"purchase_currency" gorm:"type:varchar(8);not null;default:''"`
+
 	StartTime int64  `json:"start_time" gorm:"bigint"`
 	EndTime   int64  `json:"end_time" gorm:"bigint;index;index:idx_user_sub_active,priority:3"`
 	Status    string `json:"status" gorm:"type:varchar(32);index;index:idx_user_sub_active,priority:2"` // active/expired/cancelled
@@ -583,6 +586,11 @@ func CreateUserSubscriptionFromPlanTx(tx *gorm.DB, userId int, plan *Subscriptio
 	}
 	upgradeGroup := strings.TrimSpace(plan.UpgradeGroup)
 	prevGroup := ""
+	purchasePriceAmount := 0.0
+	purchaseCurrency := strings.TrimSpace(plan.Currency)
+	if source == "order" {
+		purchasePriceAmount = plan.PriceAmount
+	}
 	if upgradeGroup != "" {
 		currentGroup, err := getUserGroupByIdTx(tx, userId)
 		if err != nil {
@@ -597,20 +605,22 @@ func CreateUserSubscriptionFromPlanTx(tx *gorm.DB, userId int, plan *Subscriptio
 		}
 	}
 	sub := &UserSubscription{
-		UserId:        userId,
-		PlanId:        plan.Id,
-		AmountTotal:   plan.TotalAmount,
-		AmountUsed:    0,
-		StartTime:     now.Unix(),
-		EndTime:       endUnix,
-		Status:        "active",
-		Source:        source,
-		LastResetTime: lastReset,
-		NextResetTime: nextReset,
-		UpgradeGroup:  upgradeGroup,
-		PrevUserGroup: prevGroup,
-		CreatedAt:     common.GetTimestamp(),
-		UpdatedAt:     common.GetTimestamp(),
+		UserId:              userId,
+		PlanId:              plan.Id,
+		AmountTotal:         plan.TotalAmount,
+		AmountUsed:          0,
+		PurchasePriceAmount: purchasePriceAmount,
+		PurchaseCurrency:    purchaseCurrency,
+		StartTime:           now.Unix(),
+		EndTime:             endUnix,
+		Status:              "active",
+		Source:              source,
+		LastResetTime:       lastReset,
+		NextResetTime:       nextReset,
+		UpgradeGroup:        upgradeGroup,
+		PrevUserGroup:       prevGroup,
+		CreatedAt:           common.GetTimestamp(),
+		UpdatedAt:           common.GetTimestamp(),
 	}
 	if err := tx.Create(sub).Error; err != nil {
 		return nil, err
@@ -927,6 +937,16 @@ func listActiveUserSubscriptionsWithPlansTx(tx *gorm.DB, userId int, now int64) 
 	return result, nil
 }
 
+func getSubscriptionRefundBase(sub UserSubscription, plan SubscriptionPlan) (float64, string) {
+	if sub.PurchasePriceAmount > 0 || sub.PurchaseCurrency != "" {
+		return sub.PurchasePriceAmount, strings.TrimSpace(sub.PurchaseCurrency)
+	}
+	if sub.Source == "order" {
+		return plan.PriceAmount, strings.TrimSpace(plan.Currency)
+	}
+	return 0, strings.TrimSpace(plan.Currency)
+}
+
 func calculateSubscriptionConversionPreviewItem(now int64, sub UserSubscription, plan SubscriptionPlan) (SubscriptionConversionPreviewItem, error) {
 	durationSeconds := sub.EndTime - sub.StartTime
 	if durationSeconds <= 0 {
@@ -948,7 +968,11 @@ func calculateSubscriptionConversionPreviewItem(now int64, sub UserSubscription,
 		ratio = decimal.NewFromInt(1)
 	}
 
-	refundMoney := decimal.NewFromFloat(plan.PriceAmount).Mul(ratio).Round(6)
+	basePriceAmount, baseCurrency := getSubscriptionRefundBase(sub, plan)
+	if basePriceAmount < 0 {
+		basePriceAmount = 0
+	}
+	refundMoney := decimal.NewFromFloat(basePriceAmount).Mul(ratio).Round(6)
 	refundQuota := refundMoney.Mul(decimal.NewFromFloat(common.QuotaPerUnit)).Floor().IntPart()
 	if refundQuota < 0 {
 		refundQuota = 0
@@ -958,8 +982,8 @@ func calculateSubscriptionConversionPreviewItem(now int64, sub UserSubscription,
 		UserSubscriptionId: sub.Id,
 		PlanId:             plan.Id,
 		PlanTitle:          plan.Title,
-		PriceAmount:        plan.PriceAmount,
-		Currency:           plan.Currency,
+		PriceAmount:        basePriceAmount,
+		Currency:           baseCurrency,
 		StartTime:          sub.StartTime,
 		EndTime:            sub.EndTime,
 		DurationSeconds:    durationSeconds,

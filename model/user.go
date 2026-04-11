@@ -606,12 +606,18 @@ func (user *User) Edit(updatePassword bool) error {
 	}
 
 	newUser := *user
+	if newUser.ReferralCommissionPercent != nil {
+		if *newUser.ReferralCommissionPercent < 0 || *newUser.ReferralCommissionPercent > 100 {
+			return fmt.Errorf("referral_commission_percent must be between 0 and 100")
+		}
+	}
 	updates := map[string]interface{}{
-		"username":     newUser.Username,
-		"display_name": newUser.DisplayName,
-		"group":        newUser.Group,
-		"quota":        newUser.Quota,
-		"remark":       newUser.Remark,
+		"username":                    newUser.Username,
+		"display_name":                newUser.DisplayName,
+		"group":                       newUser.Group,
+		"quota":                       newUser.Quota,
+		"remark":                      newUser.Remark,
+		"referral_commission_percent": newUser.ReferralCommissionPercent,
 	}
 	if updatePassword {
 		updates["password"] = newUser.Password
@@ -619,6 +625,9 @@ func (user *User) Edit(updatePassword bool) error {
 
 	DB.First(&user, user.Id)
 	if err = DB.Model(user).Updates(updates).Error; err != nil {
+		return err
+	}
+	if err = DB.First(user, user.Id).Error; err != nil {
 		return err
 	}
 

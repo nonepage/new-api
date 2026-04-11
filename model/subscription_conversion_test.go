@@ -77,18 +77,24 @@ func createSubscriptionConversionPlan(t *testing.T, title string, price float64,
 }
 
 func createUserSubscriptionForConversionTest(t *testing.T, userId int, planId int, startTime int64, endTime int64, status string) *UserSubscription {
+	return createUserSubscriptionForConversionTestWithSource(t, userId, planId, startTime, endTime, status, "order", 0, "")
+}
+
+func createUserSubscriptionForConversionTestWithSource(t *testing.T, userId int, planId int, startTime int64, endTime int64, status string, source string, purchasePriceAmount float64, purchaseCurrency string) *UserSubscription {
 	t.Helper()
 	subscription := &UserSubscription{
-		UserId:        userId,
-		PlanId:        planId,
-		AmountTotal:   1000,
-		AmountUsed:    100,
-		StartTime:     startTime,
-		EndTime:       endTime,
-		Status:        status,
-		Source:        "order",
-		UpgradeGroup:  "vip",
-		PrevUserGroup: "default",
+		UserId:              userId,
+		PlanId:              planId,
+		AmountTotal:         1000,
+		AmountUsed:          100,
+		PurchasePriceAmount: purchasePriceAmount,
+		PurchaseCurrency:    purchaseCurrency,
+		StartTime:           startTime,
+		EndTime:             endTime,
+		Status:              status,
+		Source:              source,
+		UpgradeGroup:        "vip",
+		PrevUserGroup:       "default",
 	}
 	require.NoError(t, DB.Create(subscription).Error)
 	return subscription
@@ -210,4 +216,62 @@ func TestExecuteSubscriptionWalletConversion_NoActiveSubscriptions(t *testing.T)
 	require.Error(t, err)
 	assert.Nil(t, result)
 	assert.Contains(t, err.Error(), "no active subscriptions")
+}
+
+func TestPreviewSubscriptionWalletConversion_UsesPurchaseSnapshotWhenPlanPriceChanges(t *testing.T) {
+	prepareSubscriptionConversionTest(t)
+
+	user := createSubscriptionConversionUser(t, "vip", 1000)
+	now := GetDBTimestamp()
+	plan := createSubscriptionConversionPlan(t, "Repriced Monthly", 10, "vip")
+	createUserSubscriptionForConversionTestWithSource(
+		t,
+		user.Id,
+		plan.Id,
+		now-1000,
+		now+1000,
+		SubscriptionStatusActive,
+		"order",
+		10,
+		"USD",
+	)
+	require.NoError(t, DB.Model(&SubscriptionPlan{}).Where("id = ?", plan.Id).Update("price_amount", 99).Error)
+
+	preview, err := PreviewSubscriptionWalletConversion(user.Id)
+	require.NoError(t, err)
+	require.NotNil(t, preview)
+	require.Len(t, preview.Items, 1)
+
+	item := preview.Items[0]
+	assert.Equal(t, 10.0, item.PriceAmount)
+	assert.Equal(t, "USD", item.Currency)
+	assert.InDelta(t, 5.0, item.RefundMoney, 0.2)
+}
+
+func TestExecuteSubscriptionWalletConversion_AdminSubscriptionDoesNotRefund(t *testing.T) {
+	prepareSubscriptionConversionTest(t)
+
+	user := createSubscriptionConversionUser(t, "vip", 1000)
+	now := GetDBTimestamp()
+	plan := createSubscriptionConversionPlan(t, "Admin Granted", 30, "vip")
+	createUserSubscriptionForConversionTestWithSource(
+		t,
+		user.Id,
+		plan.Id,
+		now-1000,
+		now+1000,
+		SubscriptionStatusActive,
+		"admin",
+		0,
+		"USD",
+	)
+
+	result, err := ExecuteSubscriptionWalletConversion(user.Id, fmt.Sprintf("admin-req-%d", time.Now().UnixNano()))
+	require.NoError(t, err)
+	require.NotNil(t, result)
+
+	assert.Equal(t, 1, result.SubscriptionCount)
+	assert.EqualValues(t, 0, result.TotalRefundQuota)
+	assert.Equal(t, 0.0, result.TotalRefundMoney)
+	assert.Equal(t, user.Quota, result.NewUserQuota)
 }

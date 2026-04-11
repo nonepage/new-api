@@ -3,6 +3,7 @@ package model
 import (
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/logger"
@@ -52,6 +53,10 @@ func (topUp *TopUp) GetEffectivePaidAmount() float64 {
 func (topUp *TopUp) GetEffectiveCurrency() string {
 	if topUp.PaidCurrency != "" {
 		return topUp.PaidCurrency
+	}
+	switch strings.ToLower(strings.TrimSpace(topUp.PaymentMethod)) {
+	case "stripe", "creem":
+		return "USD"
 	}
 	return "CNY"
 }

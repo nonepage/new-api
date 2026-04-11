@@ -3,6 +3,7 @@ package model
 import (
 	"errors"
 	"fmt"
+	"net/mail"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
@@ -179,8 +180,14 @@ func validateInvoiceProfileSnapshot(snapshot InvoiceProfileSnapshot) error {
 	if snapshot.Title == "" {
 		return errors.New("invoice title is required")
 	}
-	if snapshot.Type == "company" && snapshot.TaxNo == "" {
-		return errors.New("tax number is required for company invoices")
+	if snapshot.TaxNo == "" {
+		return errors.New("tax number is required")
+	}
+	if snapshot.Email == "" {
+		return errors.New("invoice email is required")
+	}
+	if _, err := mail.ParseAddress(snapshot.Email); err != nil {
+		return errors.New("invoice email is invalid")
 	}
 	return nil
 }
@@ -237,8 +244,8 @@ func SaveInvoiceProfile(profile *InvoiceProfile) error {
 	profile.Address = strings.TrimSpace(profile.Address)
 	profile.BankName = strings.TrimSpace(profile.BankName)
 	profile.BankAccount = strings.TrimSpace(profile.BankAccount)
-	if profile.Title == "" {
-		return errors.New("invoice title is required")
+	if err := validateInvoiceProfileSnapshot(profile.ToSnapshot()); err != nil {
+		return err
 	}
 	return DB.Transaction(func(tx *gorm.DB) error {
 		if profile.IsDefault {
@@ -284,7 +291,7 @@ func ListInvoiceAvailableTopUps(userId int, keyword string, pageInfo *common.Pag
 }
 
 func ListInvoiceApplicationsByUser(userId int, keyword string, pageInfo *common.PageInfo) ([]*InvoiceApplication, int64, error) {
-	return listInvoiceApplications(DB.Where("user_id = ?", userId), keyword, pageInfo)
+	return listInvoiceApplications(DB.Model(&InvoiceApplication{}).Where("user_id = ?", userId), keyword, pageInfo)
 }
 
 func ListInvoiceApplicationsByAdmin(keyword string, status string, userId int, pageInfo *common.PageInfo) ([]*InvoiceApplication, int64, error) {
@@ -459,23 +466,44 @@ func CancelInvoiceApplication(userId int, applicationId int) error {
 func ApproveInvoiceApplication(applicationId int, reviewerId int, adminRemark string) error {
 	return DB.Transaction(func(tx *gorm.DB) error {
 		var application InvoiceApplication
-		if err := tx.Set("gorm:query_option", "FOR UPDATE").Where("id = ?", applicationId).First(&application).Error; err != nil {
+		if err := tx.Set("gorm:query_option", "FOR UPDATE").Preload("Items").Where("id = ?", applicationId).First(&application).Error; err != nil {
 			return err
 		}
 		if application.Status != common.InvoiceApplicationStatusPendingReview {
 			return errors.New("application status is invalid")
 		}
+
+		record := &InvoiceRecord{
+			UserId:      application.UserId,
+			Status:      common.InvoiceRecordStatusIssued,
+			TotalAmount: application.TotalAmount,
+			Currency:    application.Currency,
+			IssuerId:    reviewerId,
+			Remark:      strings.TrimSpace(adminRemark),
+		}
+		if err := tx.Create(record).Error; err != nil {
+			return err
+		}
+
+		if err := tx.Create(&InvoiceRecordApplication{
+			InvoiceRecordId: record.Id,
+			ApplicationId:   application.Id,
+		}).Error; err != nil {
+			return err
+		}
+
 		if err := tx.Model(&InvoiceApplication{}).Where("id = ?", applicationId).Updates(map[string]interface{}{
-			"status":       common.InvoiceApplicationStatusApproved,
+			"status":       common.InvoiceApplicationStatusIssued,
 			"reviewed_by":  reviewerId,
 			"reviewed_at":  common.GetTimestamp(),
 			"admin_remark": strings.TrimSpace(adminRemark),
 		}).Error; err != nil {
 			return err
 		}
+
 		return tx.Model(&TopUp{}).
 			Where("id IN (?)", tx.Model(&InvoiceApplicationItem{}).Select("top_up_id").Where("application_id = ?", applicationId)).
-			Update("invoice_status", common.InvoiceStatusApproved).Error
+			Update("invoice_status", common.InvoiceStatusIssued).Error
 	})
 }
 
@@ -485,7 +513,7 @@ func RejectInvoiceApplication(applicationId int, reviewerId int, rejectedReason 
 		if err := tx.Set("gorm:query_option", "FOR UPDATE").Where("id = ?", applicationId).First(&application).Error; err != nil {
 			return err
 		}
-		if application.Status != common.InvoiceApplicationStatusPendingReview && application.Status != common.InvoiceApplicationStatusApproved {
+		if application.Status != common.InvoiceApplicationStatusPendingReview {
 			return errors.New("application status is invalid")
 		}
 		var items []InvoiceApplicationItem
@@ -535,7 +563,11 @@ func IssueInvoiceRecord(applicationIDs []int, issuerId int, invoiceNo string, fi
 	var record *InvoiceRecord
 	err := DB.Transaction(func(tx *gorm.DB) error {
 		var applications []InvoiceApplication
-		if err := tx.Set("gorm:query_option", "FOR UPDATE").Preload("Items").Where("id IN ? AND status = ?", uniqueIDs, common.InvoiceApplicationStatusApproved).Find(&applications).Error; err != nil {
+		issueableStatuses := []string{
+			common.InvoiceApplicationStatusPendingReview,
+			common.InvoiceApplicationStatusApproved,
+		}
+		if err := tx.Set("gorm:query_option", "FOR UPDATE").Preload("Items").Where("id IN ? AND status IN ?", uniqueIDs, issueableStatuses).Find(&applications).Error; err != nil {
 			return err
 		}
 		if len(applications) != len(uniqueIDs) {
@@ -634,12 +666,17 @@ func VoidInvoiceRecord(recordId int, operatorId int, remark string) error {
 			return err
 		}
 		if len(applicationIDs) > 0 {
-			if err := tx.Model(&InvoiceApplication{}).Where("id IN ?", applicationIDs).Update("status", common.InvoiceApplicationStatusVoided).Error; err != nil {
+			if err := tx.Model(&InvoiceApplication{}).Where("id IN ?", applicationIDs).Updates(map[string]interface{}{
+				"status":          common.InvoiceApplicationStatusPendingReview,
+				"reviewed_by":     0,
+				"reviewed_at":     0,
+				"rejected_reason": "",
+			}).Error; err != nil {
 				return err
 			}
 			return tx.Model(&TopUp{}).
 				Where("id IN (?)", tx.Model(&InvoiceApplicationItem{}).Select("top_up_id").Where("application_id IN ?", applicationIDs)).
-				Update("invoice_status", common.InvoiceStatusApproved).Error
+				Update("invoice_status", common.InvoiceStatusPendingReview).Error
 		}
 		return nil
 	})
