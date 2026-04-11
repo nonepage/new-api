@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/shopspring/decimal"
 	"gorm.io/gorm"
 )
 
@@ -154,6 +155,24 @@ func (i *InvoiceRecordApplication) BeforeCreate(tx *gorm.DB) error {
 		i.CreatedAt = common.GetTimestamp()
 	}
 	return nil
+}
+
+func normalizeInvoiceMoney(value float64) float64 {
+	return decimal.NewFromFloat(value).Round(6).InexactFloat64()
+}
+
+func recordInvoiceManageLog(adminId int, content string) {
+	if adminId <= 0 || strings.TrimSpace(content) == "" {
+		return
+	}
+	RecordLog(adminId, LogTypeManage, content)
+}
+
+func recordInvoiceSystemLog(userId int, content string) {
+	if userId <= 0 || strings.TrimSpace(content) == "" {
+		return
+	}
+	RecordLog(userId, LogTypeSystem, content)
 }
 
 func buildInvoiceApplicationNo() string {
@@ -375,6 +394,7 @@ func CreateInvoiceApplication(userId int, topupIDs []int, snapshot InvoiceProfil
 	}
 
 	var application *InvoiceApplication
+	var auditLog string
 	err = DB.Transaction(func(tx *gorm.DB) error {
 		var topups []*TopUp
 		if err := tx.Set("gorm:query_option", "FOR UPDATE").Where("id IN ? AND user_id = ? AND status = ? AND invoice_status = ?", uniqueIDs, userId, common.TopUpStatusSuccess, common.InvoiceStatusNone).Find(&topups).Error; err != nil {
@@ -384,12 +404,12 @@ func CreateInvoiceApplication(userId int, topupIDs []int, snapshot InvoiceProfil
 			return errors.New("some orders are unavailable for invoicing")
 		}
 
-		totalAmount := 0.0
+		totalAmount := decimal.Zero
 		currency := ""
 		items := make([]InvoiceApplicationItem, 0, len(topups))
 		for _, topup := range topups {
-			amount := topup.GetEffectivePaidAmount()
-			if amount <= 0 {
+			amountDecimal := decimal.NewFromFloat(topup.GetEffectivePaidAmount()).Round(6)
+			if !amountDecimal.GreaterThan(decimal.Zero) {
 				return fmt.Errorf("order %s has invalid paid amount", topup.TradeNo)
 			}
 			topupCurrency := topup.GetEffectiveCurrency()
@@ -398,11 +418,11 @@ func CreateInvoiceApplication(userId int, topupIDs []int, snapshot InvoiceProfil
 			} else if currency != topupCurrency {
 				return errors.New("selected orders must use the same currency")
 			}
-			totalAmount += amount
+			totalAmount = totalAmount.Add(amountDecimal)
 			items = append(items, InvoiceApplicationItem{
 				TopUpId:      topup.Id,
 				OrderTradeNo: topup.TradeNo,
-				Amount:       amount,
+				Amount:       amountDecimal.InexactFloat64(),
 				Currency:     topupCurrency,
 			})
 		}
@@ -410,7 +430,7 @@ func CreateInvoiceApplication(userId int, topupIDs []int, snapshot InvoiceProfil
 		application = &InvoiceApplication{
 			UserId:          userId,
 			Status:          common.InvoiceApplicationStatusPendingReview,
-			TotalAmount:     totalAmount,
+			TotalAmount:     totalAmount.InexactFloat64(),
 			Currency:        currency,
 			ProfileSnapshot: string(profileBytes),
 			Remark:          strings.TrimSpace(remark),
@@ -430,16 +450,19 @@ func CreateInvoiceApplication(userId int, topupIDs []int, snapshot InvoiceProfil
 		}
 
 		application.Items = items
+		auditLog = fmt.Sprintf("submitted invoice application %s for %d orders, total=%s %s", application.ApplicationNo, len(items), totalAmount.StringFixed(6), currency)
 		return nil
 	})
 	if err != nil {
 		return nil, err
 	}
+	recordInvoiceSystemLog(userId, auditLog)
 	return application, nil
 }
 
 func CancelInvoiceApplication(userId int, applicationId int) error {
-	return DB.Transaction(func(tx *gorm.DB) error {
+	var auditLog string
+	err := DB.Transaction(func(tx *gorm.DB) error {
 		var application InvoiceApplication
 		if err := tx.Set("gorm:query_option", "FOR UPDATE").Where("id = ? AND user_id = ?", applicationId, userId).First(&application).Error; err != nil {
 			return err
@@ -465,12 +488,22 @@ func CancelInvoiceApplication(userId int, applicationId int) error {
 				return err
 			}
 		}
+		auditLog = fmt.Sprintf("cancelled invoice application %s", application.ApplicationNo)
 		return nil
 	})
+	if err != nil {
+		return err
+	}
+	recordInvoiceSystemLog(userId, auditLog)
+	return nil
 }
 
 func ApproveInvoiceApplication(applicationId int, reviewerId int, adminRemark string) error {
-	return DB.Transaction(func(tx *gorm.DB) error {
+	var applicationNo string
+	var targetUserId int
+	var totalAmount float64
+	var currency string
+	err := DB.Transaction(func(tx *gorm.DB) error {
 		var application InvoiceApplication
 		if err := tx.Set("gorm:query_option", "FOR UPDATE").Preload("Items").Where("id = ?", applicationId).First(&application).Error; err != nil {
 			return err
@@ -478,6 +511,10 @@ func ApproveInvoiceApplication(applicationId int, reviewerId int, adminRemark st
 		if application.Status != common.InvoiceApplicationStatusPendingReview {
 			return errors.New("application status is invalid")
 		}
+		applicationNo = application.ApplicationNo
+		targetUserId = application.UserId
+		totalAmount = application.TotalAmount
+		currency = application.Currency
 
 		record := &InvoiceRecord{
 			UserId:      application.UserId,
@@ -511,10 +548,18 @@ func ApproveInvoiceApplication(applicationId int, reviewerId int, adminRemark st
 			Where("id IN (?)", tx.Model(&InvoiceApplicationItem{}).Select("top_up_id").Where("application_id = ?", applicationId)).
 			Update("invoice_status", common.InvoiceStatusIssued).Error
 	})
+	if err != nil {
+		return err
+	}
+	recordInvoiceManageLog(reviewerId, fmt.Sprintf("approved invoice application %s for user=%d total=%.6f %s", applicationNo, targetUserId, normalizeInvoiceMoney(totalAmount), currency))
+	recordInvoiceSystemLog(targetUserId, fmt.Sprintf("invoice application %s was approved", applicationNo))
+	return nil
 }
 
 func RejectInvoiceApplication(applicationId int, reviewerId int, rejectedReason string, adminRemark string) error {
-	return DB.Transaction(func(tx *gorm.DB) error {
+	var applicationNo string
+	var targetUserId int
+	err := DB.Transaction(func(tx *gorm.DB) error {
 		var application InvoiceApplication
 		if err := tx.Set("gorm:query_option", "FOR UPDATE").Where("id = ?", applicationId).First(&application).Error; err != nil {
 			return err
@@ -522,6 +567,8 @@ func RejectInvoiceApplication(applicationId int, reviewerId int, rejectedReason 
 		if application.Status != common.InvoiceApplicationStatusPendingReview {
 			return errors.New("application status is invalid")
 		}
+		applicationNo = application.ApplicationNo
+		targetUserId = application.UserId
 		var items []InvoiceApplicationItem
 		if err := tx.Where("application_id = ?", application.Id).Find(&items).Error; err != nil {
 			return err
@@ -544,6 +591,12 @@ func RejectInvoiceApplication(applicationId int, reviewerId int, rejectedReason 
 		}
 		return nil
 	})
+	if err != nil {
+		return err
+	}
+	recordInvoiceManageLog(reviewerId, fmt.Sprintf("rejected invoice application %s for user=%d reason=%s", applicationNo, targetUserId, strings.TrimSpace(rejectedReason)))
+	recordInvoiceSystemLog(targetUserId, fmt.Sprintf("invoice application %s was rejected", applicationNo))
+	return nil
 }
 
 func IssueInvoiceRecord(applicationIDs []int, issuerId int, invoiceNo string, fileURL string, remark string) (*InvoiceRecord, error) {
@@ -567,6 +620,7 @@ func IssueInvoiceRecord(applicationIDs []int, issuerId int, invoiceNo string, fi
 	}
 
 	var record *InvoiceRecord
+	var totalAmount decimal.Decimal
 	err := DB.Transaction(func(tx *gorm.DB) error {
 		var applications []InvoiceApplication
 		issueableStatuses := []string{
@@ -582,7 +636,7 @@ func IssueInvoiceRecord(applicationIDs []int, issuerId int, invoiceNo string, fi
 
 		userId := 0
 		currency := ""
-		totalAmount := 0.0
+		totalAmount = decimal.Zero
 		topupIDs := make([]int, 0)
 		for _, application := range applications {
 			if userId == 0 {
@@ -595,7 +649,7 @@ func IssueInvoiceRecord(applicationIDs []int, issuerId int, invoiceNo string, fi
 			} else if currency != application.Currency {
 				return errors.New("applications must use the same currency")
 			}
-			totalAmount += application.TotalAmount
+			totalAmount = totalAmount.Add(decimal.NewFromFloat(application.TotalAmount).Round(6))
 			for _, item := range application.Items {
 				topupIDs = append(topupIDs, item.TopUpId)
 			}
@@ -605,7 +659,7 @@ func IssueInvoiceRecord(applicationIDs []int, issuerId int, invoiceNo string, fi
 			InvoiceNo:   strings.TrimSpace(invoiceNo),
 			UserId:      userId,
 			Status:      common.InvoiceRecordStatusIssued,
-			TotalAmount: totalAmount,
+			TotalAmount: totalAmount.InexactFloat64(),
 			Currency:    currency,
 			IssuerId:    issuerId,
 			FileURL:     strings.TrimSpace(fileURL),
@@ -644,11 +698,15 @@ func IssueInvoiceRecord(applicationIDs []int, issuerId int, invoiceNo string, fi
 	if err != nil {
 		return nil, err
 	}
+	recordInvoiceManageLog(issuerId, fmt.Sprintf("issued invoice record %s for user=%d total=%.6f %s applications=%d", record.InvoiceNo, record.UserId, normalizeInvoiceMoney(record.TotalAmount), record.Currency, len(record.Applications)))
+	recordInvoiceSystemLog(record.UserId, fmt.Sprintf("invoice record %s was issued", record.InvoiceNo))
 	return record, nil
 }
 
 func VoidInvoiceRecord(recordId int, operatorId int, remark string) error {
-	return DB.Transaction(func(tx *gorm.DB) error {
+	var invoiceNo string
+	var targetUserId int
+	err := DB.Transaction(func(tx *gorm.DB) error {
 		var record InvoiceRecord
 		if err := tx.Set("gorm:query_option", "FOR UPDATE").Where("id = ?", recordId).First(&record).Error; err != nil {
 			return err
@@ -656,6 +714,8 @@ func VoidInvoiceRecord(recordId int, operatorId int, remark string) error {
 		if record.Status != common.InvoiceRecordStatusIssued {
 			return errors.New("invoice record status is invalid")
 		}
+		invoiceNo = record.InvoiceNo
+		targetUserId = record.UserId
 		var links []InvoiceRecordApplication
 		if err := tx.Where("invoice_record_id = ?", record.Id).Find(&links).Error; err != nil {
 			return err
@@ -687,4 +747,10 @@ func VoidInvoiceRecord(recordId int, operatorId int, remark string) error {
 		}
 		return nil
 	})
+	if err != nil {
+		return err
+	}
+	recordInvoiceManageLog(operatorId, fmt.Sprintf("voided invoice record %s for user=%d remark=%s", invoiceNo, targetUserId, strings.TrimSpace(remark)))
+	recordInvoiceSystemLog(targetUserId, fmt.Sprintf("invoice record %s was voided and returned for review", invoiceNo))
+	return nil
 }

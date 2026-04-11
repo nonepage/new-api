@@ -33,16 +33,15 @@ func validUserInfo(username string, role int) bool {
 func authHelper(c *gin.Context, minRole int) {
 	session := sessions.Default(c)
 	username := session.Get("username")
-	role := session.Get("role")
 	id := session.Get("id")
 	useAccessToken := false
+
 	if username == nil {
-		// Check access token
 		accessToken := c.Request.Header.Get("Authorization")
 		if accessToken == "" {
 			c.JSON(http.StatusUnauthorized, gin.H{
 				"success": false,
-				"message": "无权进行此操作，未登录且未提供 access token",
+				"message": "鏃犳潈杩涜姝ゆ搷浣滐紝鏈櫥褰曚笖鏈彁渚?access token",
 			})
 			c.Abort()
 			return
@@ -52,31 +51,29 @@ func authHelper(c *gin.Context, minRole int) {
 			if !validUserInfo(user.Username, user.Role) {
 				c.JSON(http.StatusOK, gin.H{
 					"success": false,
-					"message": "无权进行此操作，用户信息无效",
+					"message": "鏃犳潈杩涜姝ゆ搷浣滐紝鐢ㄦ埛淇℃伅鏃犳晥",
 				})
 				c.Abort()
 				return
 			}
-			// Token is valid
 			username = user.Username
-			role = user.Role
 			id = user.Id
 			useAccessToken = true
 		} else {
 			c.JSON(http.StatusOK, gin.H{
 				"success": false,
-				"message": "无权进行此操作，access token 无效",
+				"message": "鏃犳潈杩涜姝ゆ搷浣滐紝access token 鏃犳晥",
 			})
 			c.Abort()
 			return
 		}
 	}
-	// get header New-Api-User
+
 	apiUserIdStr := c.Request.Header.Get("New-Api-User")
 	if apiUserIdStr == "" {
 		c.JSON(http.StatusUnauthorized, gin.H{
 			"success": false,
-			"message": "无权进行此操作，未提供 New-Api-User",
+			"message": "鏃犳潈杩涜姝ゆ搷浣滐紝鏈彁渚?New-Api-User",
 		})
 		c.Abort()
 		return
@@ -85,20 +82,20 @@ func authHelper(c *gin.Context, minRole int) {
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{
 			"success": false,
-			"message": "无权进行此操作，New-Api-User 格式错误",
+			"message": "鏃犳潈杩涜姝ゆ搷浣滐紝New-Api-User 鏍煎紡閿欒",
 		})
 		c.Abort()
 		return
-
 	}
 	if id != apiUserId {
 		c.JSON(http.StatusUnauthorized, gin.H{
 			"success": false,
-			"message": "无权进行此操作，New-Api-User 与登录用户不匹配",
+			"message": "鏃犳潈杩涜姝ゆ搷浣滐紝New-Api-User 涓庣櫥褰曠敤鎴蜂笉鍖归厤",
 		})
 		c.Abort()
 		return
 	}
+
 	userCache, err := model.GetUserCache(apiUserId)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
@@ -111,32 +108,51 @@ func authHelper(c *gin.Context, minRole int) {
 	if userCache.Status == common.UserStatusDisabled {
 		c.JSON(http.StatusOK, gin.H{
 			"success": false,
-			"message": "用户已被封禁",
+			"message": "鐢ㄦ埛宸茶灏佺",
 		})
 		c.Abort()
 		return
 	}
-	if role.(int) < minRole {
+	if userCache.Role < minRole {
 		c.JSON(http.StatusOK, gin.H{
 			"success": false,
-			"message": "无权进行此操作，权限不足",
+			"message": "鏃犳潈杩涜姝ゆ搷浣滐紝鏉冮檺涓嶈冻",
 		})
 		c.Abort()
 		return
 	}
-	if !validUserInfo(username.(string), role.(int)) {
+	if !validUserInfo(userCache.Username, userCache.Role) {
 		c.JSON(http.StatusOK, gin.H{
 			"success": false,
-			"message": "无权进行此操作，用户信息无效",
+			"message": "鏃犳潈杩涜姝ゆ搷浣滐紝鐢ㄦ埛淇℃伅鏃犳晥",
 		})
 		c.Abort()
 		return
 	}
-	// 防止不同newapi版本冲突，导致数据不通用
+
+	if !useAccessToken {
+		if cachedRole, ok := session.Get("role").(int); !ok || cachedRole != userCache.Role {
+			session.Set("role", userCache.Role)
+		}
+		if cachedStatus, ok := session.Get("status").(int); !ok || cachedStatus != userCache.Status {
+			session.Set("status", userCache.Status)
+		}
+		if cachedGroup, ok := session.Get("group").(string); !ok || cachedGroup != userCache.Group {
+			session.Set("group", userCache.Group)
+		}
+		if cachedUsername, ok := session.Get("username").(string); !ok || cachedUsername != userCache.Username {
+			session.Set("username", userCache.Username)
+		}
+		if err := session.Save(); err != nil {
+			common.SysLog("failed to refresh auth session from cache: " + err.Error())
+		}
+	}
+
+	// Prevent mixed new-api versions from reusing incompatible session data.
 	c.Header("Auth-Version", "864b7076dbcd0a3c01b5520316720ebf")
 	c.Set("username", userCache.Username)
-	c.Set("role", role)
-	c.Set("id", id)
+	c.Set("role", userCache.Role)
+	c.Set("id", apiUserId)
 	c.Set("status", userCache.Status)
 	c.Set("group", userCache.Group)
 	c.Set("user_group", userCache.Group)
@@ -182,31 +198,34 @@ func WssAuth(c *gin.Context) {
 // Used for endpoints that need to be accessible from both the dashboard and API clients.
 func TokenOrUserAuth() func(c *gin.Context) {
 	return func(c *gin.Context) {
-		// Try session auth first (dashboard users)
 		session := sessions.Default(c)
-		if id := session.Get("id"); id != nil {
-			if status, ok := session.Get("status").(int); ok && status == common.UserStatusEnabled {
-				c.Set("id", id)
-				c.Next()
-				return
+		if idValue := session.Get("id"); idValue != nil {
+			if userId, ok := idValue.(int); ok && userId > 0 {
+				userCache, err := model.GetUserCache(userId)
+				if err == nil && userCache.Status == common.UserStatusEnabled {
+					c.Set("id", userId)
+					c.Set("username", userCache.Username)
+					c.Set("role", userCache.Role)
+					c.Set("status", userCache.Status)
+					c.Set("group", userCache.Group)
+					c.Set("user_group", userCache.Group)
+					c.Next()
+					return
+				}
 			}
 		}
-		// Fall back to token auth (API clients)
 		TokenAuth()(c)
 	}
 }
 
-// TokenAuthReadOnly 宽松版本的令牌认证中间件，用于只读查询接口。
-// 只验证令牌 key 是否存在，不检查令牌状态、过期时间和额度。
-// 即使令牌已过期、已耗尽或已禁用，也允许访问。
-// 仍然检查用户是否被封禁。
+// TokenAuthReadOnly 瀹芥澗鐗堟湰鐨勪护鐗岃璇佷腑闂翠欢锛岀敤浜庡彧璇绘煡璇㈡帴鍙ｃ€?// 鍙獙璇佷护鐗?key 鏄惁瀛樺湪锛屼笉妫€鏌ヤ护鐗岀姸鎬併€佽繃鏈熸椂闂村拰棰濆害銆?// 鍗充娇浠ょ墝宸茶繃鏈熴€佸凡鑰楀敖鎴栧凡绂佺敤锛屼篃鍏佽璁块棶銆?// 浠嶇劧妫€鏌ョ敤鎴锋槸鍚﹁灏佺銆?
 func TokenAuthReadOnly() func(c *gin.Context) {
 	return func(c *gin.Context) {
 		key := c.Request.Header.Get("Authorization")
 		if key == "" {
 			c.JSON(http.StatusUnauthorized, gin.H{
 				"success": false,
-				"message": "未提供 Authorization 请求头",
+				"message": "missing Authorization header",
 			})
 			c.Abort()
 			return
@@ -222,7 +241,7 @@ func TokenAuthReadOnly() func(c *gin.Context) {
 		if err != nil {
 			c.JSON(http.StatusUnauthorized, gin.H{
 				"success": false,
-				"message": "无效的令牌",
+				"message": "invalid token",
 			})
 			c.Abort()
 			return
@@ -240,7 +259,7 @@ func TokenAuthReadOnly() func(c *gin.Context) {
 		if userCache.Status != common.UserStatusEnabled {
 			c.JSON(http.StatusForbidden, gin.H{
 				"success": false,
-				"message": "用户已被封禁",
+				"message": "鐢ㄦ埛宸茶灏佺",
 			})
 			c.Abort()
 			return
@@ -255,7 +274,7 @@ func TokenAuthReadOnly() func(c *gin.Context) {
 
 func TokenAuth() func(c *gin.Context) {
 	return func(c *gin.Context) {
-		// 先检测是否为ws
+		// 鍏堟娴嬫槸鍚︿负ws
 		if c.Request.Header.Get("Sec-WebSocket-Protocol") != "" {
 			// Sec-WebSocket-Protocol: realtime, openai-insecure-api-key.sk-xxx, openai-beta.realtime-v1
 			// read sk from Sec-WebSocket-Protocol
@@ -270,14 +289,14 @@ func TokenAuth() func(c *gin.Context) {
 			}
 			c.Request.Header.Set("Authorization", "Bearer "+key)
 		}
-		// 检查path包含/v1/messages 或 /v1/models
+		// 妫€鏌ath鍖呭惈/v1/messages 鎴?/v1/models
 		if strings.Contains(c.Request.URL.Path, "/v1/messages") || strings.Contains(c.Request.URL.Path, "/v1/models") {
 			anthropicKey := c.Request.Header.Get("x-api-key")
 			if anthropicKey != "" {
 				c.Request.Header.Set("Authorization", "Bearer "+anthropicKey)
 			}
 		}
-		// gemini api 从query中获取key
+		// gemini api 浠巕uery涓幏鍙杒ey
 		if strings.HasPrefix(c.Request.URL.Path, "/v1beta/models") ||
 			strings.HasPrefix(c.Request.URL.Path, "/v1beta/openai/models") ||
 			strings.HasPrefix(c.Request.URL.Path, "/v1/models/") {
@@ -285,7 +304,7 @@ func TokenAuth() func(c *gin.Context) {
 			if skKey != "" {
 				c.Request.Header.Set("Authorization", "Bearer "+skKey)
 			}
-			// 从x-goog-api-key header中获取key
+			// 浠巟-goog-api-key header涓幏鍙杒ey
 			xGoogKey := c.Request.Header.Get("x-goog-api-key")
 			if xGoogKey != "" {
 				c.Request.Header.Set("Authorization", "Bearer "+xGoogKey)
@@ -327,11 +346,11 @@ func TokenAuth() func(c *gin.Context) {
 			logger.LogDebug(c, "Token has IP restrictions, checking client IP %s", clientIp)
 			ip := net.ParseIP(clientIp)
 			if ip == nil {
-				abortWithOpenAiMessage(c, http.StatusForbidden, "无法解析客户端 IP 地址")
+				abortWithOpenAiMessage(c, http.StatusForbidden, "鏃犳硶瑙ｆ瀽瀹㈡埛绔?IP 鍦板潃")
 				return
 			}
 			if common.IsIpInCIDRList(ip, allowIps) == false {
-				abortWithOpenAiMessage(c, http.StatusForbidden, "您的 IP 不在令牌允许访问的列表中", types.ErrorCodeAccessDenied)
+				abortWithOpenAiMessage(c, http.StatusForbidden, "鎮ㄧ殑 IP 涓嶅湪浠ょ墝鍏佽璁块棶鐨勫垪琛ㄤ腑", types.ErrorCodeAccessDenied)
 				return
 			}
 			logger.LogDebug(c, "Client IP %s passed the token IP restrictions check", clientIp)
@@ -344,7 +363,7 @@ func TokenAuth() func(c *gin.Context) {
 		}
 		userEnabled := userCache.Status == common.UserStatusEnabled
 		if !userEnabled {
-			abortWithOpenAiMessage(c, http.StatusForbidden, "用户已被封禁")
+			abortWithOpenAiMessage(c, http.StatusForbidden, "鐢ㄦ埛宸茶灏佺")
 			return
 		}
 
@@ -355,13 +374,13 @@ func TokenAuth() func(c *gin.Context) {
 		if tokenGroup != "" {
 			// check common.UserUsableGroups[userGroup]
 			if _, ok := service.GetUserUsableGroups(userGroup)[tokenGroup]; !ok {
-				abortWithOpenAiMessage(c, http.StatusForbidden, fmt.Sprintf("无权访问 %s 分组", tokenGroup))
+				abortWithOpenAiMessage(c, http.StatusForbidden, fmt.Sprintf("鏃犳潈璁块棶 %s 鍒嗙粍", tokenGroup))
 				return
 			}
 			// check group in common.GroupRatio
 			if !ratio_setting.ContainsGroupRatio(tokenGroup) {
 				if tokenGroup != "auto" {
-					abortWithOpenAiMessage(c, http.StatusForbidden, fmt.Sprintf("分组 %s 已被弃用", tokenGroup))
+					abortWithOpenAiMessage(c, http.StatusForbidden, fmt.Sprintf("鍒嗙粍 %s 宸茶寮冪敤", tokenGroup))
 					return
 				}
 			}
@@ -402,8 +421,8 @@ func SetupContextForToken(c *gin.Context, token *model.Token, parts ...string) e
 			c.Set("specific_channel_id", parts[1])
 		} else {
 			c.Header("specific_channel_version", "701e3ae1dc3f7975556d354e0675168d004891c8")
-			abortWithOpenAiMessage(c, http.StatusForbidden, "普通用户不支持指定渠道")
-			return fmt.Errorf("普通用户不支持指定渠道")
+			abortWithOpenAiMessage(c, http.StatusForbidden, "鏅€氱敤鎴蜂笉鏀寔鎸囧畾娓犻亾")
+			return fmt.Errorf("鏅€氱敤鎴蜂笉鏀寔鎸囧畾娓犻亾")
 		}
 	}
 	return nil

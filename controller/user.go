@@ -855,10 +855,12 @@ func CreateUser(c *gin.Context) {
 	}
 	// Even for admin users, we cannot fully trust them!
 	cleanUser := model.User{
-		Username:    user.Username,
-		Password:    user.Password,
-		DisplayName: user.DisplayName,
-		Role:        user.Role, // 淇濇寔绠＄悊鍛樿缃殑瑙掕壊
+		Username:          user.Username,
+		Password:          user.Password,
+		DisplayName:       user.DisplayName,
+		RegisterIP:        c.ClientIP(),
+		RegisterUserAgent: c.Request.UserAgent(),
+		Role:              user.Role,
 	}
 	if err := cleanUser.Insert(0); err != nil {
 		common.ApiError(c, err)

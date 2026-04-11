@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/shopspring/decimal"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -87,7 +88,31 @@ func prepareReviewRegressionTest(t *testing.T) {
 			created_at BIGINT
 		)
 	`).Error)
+	require.NoError(t, DB.Exec(`
+		CREATE TABLE IF NOT EXISTS logs (
+			id INTEGER PRIMARY KEY,
+			user_id INTEGER,
+			created_at BIGINT,
+			type INTEGER,
+			content TEXT,
+			username VARCHAR(255) DEFAULT '',
+			token_name VARCHAR(255) DEFAULT '',
+			model_name VARCHAR(255) DEFAULT '',
+			quota INTEGER DEFAULT 0,
+			prompt_tokens INTEGER DEFAULT 0,
+			completion_tokens INTEGER DEFAULT 0,
+			use_time INTEGER DEFAULT 0,
+			is_stream BOOLEAN DEFAULT 0,
+			channel_id INTEGER DEFAULT 0,
+			token_id INTEGER DEFAULT 0,
+			"group" VARCHAR(64) DEFAULT '',
+			ip VARCHAR(64) DEFAULT '',
+			request_id VARCHAR(64) DEFAULT '',
+			other TEXT
+		)
+	`).Error)
 	t.Cleanup(func() {
+		DB.Exec("DELETE FROM logs")
 		DB.Exec("DELETE FROM invoice_record_applications")
 		DB.Exec("DELETE FROM invoice_records")
 		DB.Exec("DELETE FROM invoice_application_items")
@@ -242,4 +267,96 @@ func TestVoidInvoiceRecord_PreservesIssueAuditAndStoresVoidAudit(t *testing.T) {
 	assert.EqualValues(t, 2002, reloadedRecord.VoidedBy)
 	assert.Equal(t, "voided by finance", reloadedRecord.VoidRemark)
 	assert.NotZero(t, reloadedRecord.VoidedAt)
+}
+
+func TestCreateInvoiceApplication_UsesRoundedTotalsAndWritesAuditLog(t *testing.T) {
+	prepareReviewRegressionTest(t)
+
+	user := createReviewTestUser(t, "invoice-apply-user", 0, "", "")
+	firstTopup := &TopUp{
+		UserId:        user.Id,
+		TradeNo:       "invoice-apply-topup-1",
+		Status:        common.TopUpStatusSuccess,
+		PaidAmount:    0.1,
+		PaidCurrency:  "USD",
+		InvoiceStatus: common.InvoiceStatusNone,
+		PaymentMethod: "stripe",
+		CreateTime:    time.Now().Unix(),
+		CompleteTime:  time.Now().Unix(),
+	}
+	require.NoError(t, DB.Create(firstTopup).Error)
+	secondTopup := &TopUp{
+		UserId:        user.Id,
+		TradeNo:       "invoice-apply-topup-2",
+		Status:        common.TopUpStatusSuccess,
+		PaidAmount:    0.2,
+		PaidCurrency:  "USD",
+		InvoiceStatus: common.InvoiceStatusNone,
+		PaymentMethod: "stripe",
+		CreateTime:    time.Now().Unix(),
+		CompleteTime:  time.Now().Unix(),
+	}
+	require.NoError(t, DB.Create(secondTopup).Error)
+
+	application, err := CreateInvoiceApplication(user.Id, []int{firstTopup.Id, secondTopup.Id}, InvoiceProfileSnapshot{
+		Type:  "company",
+		Title: "QuantumNous",
+		TaxNo: "TAX-001",
+		Email: "invoice@example.com",
+	}, "precision test")
+	require.NoError(t, err)
+	require.NotNil(t, application)
+	assert.Equal(t, "0.300000", decimal.NewFromFloat(application.TotalAmount).StringFixed(6))
+
+	var logCount int64
+	require.NoError(t, DB.Model(&Log{}).
+		Where("user_id = ? AND type = ? AND content LIKE ?", user.Id, LogTypeSystem, "%submitted invoice application%").
+		Count(&logCount).Error)
+	assert.EqualValues(t, 1, logCount)
+}
+
+func TestApproveInvoiceApplication_WritesAdminAndUserAuditLogs(t *testing.T) {
+	prepareReviewRegressionTest(t)
+
+	user := createReviewTestUser(t, "invoice-approve-user", 0, "", "")
+	topup := &TopUp{
+		UserId:        user.Id,
+		TradeNo:       "invoice-approve-topup",
+		Status:        common.TopUpStatusSuccess,
+		PaidAmount:    19.9,
+		PaidCurrency:  "USD",
+		InvoiceStatus: common.InvoiceStatusPendingReview,
+		PaymentMethod: "stripe",
+		CreateTime:    time.Now().Unix(),
+		CompleteTime:  time.Now().Unix(),
+	}
+	require.NoError(t, DB.Create(topup).Error)
+	application := &InvoiceApplication{
+		UserId:      user.Id,
+		Status:      common.InvoiceApplicationStatusPendingReview,
+		TotalAmount: 19.9,
+		Currency:    "USD",
+	}
+	require.NoError(t, DB.Create(application).Error)
+	require.NoError(t, DB.Create(&InvoiceApplicationItem{
+		ApplicationId: application.Id,
+		TopUpId:       topup.Id,
+		OrderTradeNo:  topup.TradeNo,
+		Amount:        19.9,
+		Currency:      "USD",
+	}).Error)
+
+	require.NoError(t, ApproveInvoiceApplication(application.Id, 9001, "approved in test"))
+
+	var adminLogCount int64
+	require.NoError(t, DB.Model(&Log{}).
+		Where("user_id = ? AND type = ? AND content LIKE ?", 9001, LogTypeManage, "%approved invoice application%").
+		Count(&adminLogCount).Error)
+	assert.EqualValues(t, 1, adminLogCount)
+
+	var userLogCount int64
+	require.NoError(t, DB.Model(&Log{}).
+		Where("user_id = ? AND type = ? AND content LIKE ?", user.Id, LogTypeSystem, "%was approved%").
+		Count(&userLogCount).Error)
+	assert.EqualValues(t, 1, userLogCount)
 }

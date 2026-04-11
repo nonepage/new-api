@@ -52,6 +52,14 @@ type invoiceVoidRequest struct {
 	Remark string `json:"remark"`
 }
 
+func ensureInvoiceAdmin(c *gin.Context) bool {
+	if c.GetInt("role") < common.RoleAdminUser {
+		common.ApiErrorMsg(c, "admin permission required")
+		return false
+	}
+	return true
+}
+
 func GetInvoiceProfiles(c *gin.Context) {
 	profiles, err := model.ListInvoiceProfilesByUser(c.GetInt("id"))
 	if err != nil {
@@ -189,6 +197,9 @@ func CancelInvoiceApplication(c *gin.Context) {
 }
 
 func GetAdminInvoiceApplications(c *gin.Context) {
+	if !ensureInvoiceAdmin(c) {
+		return
+	}
 	pageInfo := common.GetPageQuery(c)
 	userId, _ := strconv.Atoi(c.Query("user_id"))
 	items, total, err := model.ListInvoiceApplicationsByAdmin(c.Query("keyword"), c.Query("status"), userId, pageInfo)
@@ -202,6 +213,9 @@ func GetAdminInvoiceApplications(c *gin.Context) {
 }
 
 func ApproveInvoiceApplication(c *gin.Context) {
+	if !ensureInvoiceAdmin(c) {
+		return
+	}
 	id, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
 		common.ApiErrorMsg(c, "invalid invoice application id")
@@ -220,6 +234,9 @@ func ApproveInvoiceApplication(c *gin.Context) {
 }
 
 func RejectInvoiceApplication(c *gin.Context) {
+	if !ensureInvoiceAdmin(c) {
+		return
+	}
 	id, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
 		common.ApiErrorMsg(c, "invalid invoice application id")
@@ -238,6 +255,9 @@ func RejectInvoiceApplication(c *gin.Context) {
 }
 
 func GetAdminInvoiceRecords(c *gin.Context) {
+	if !ensureInvoiceAdmin(c) {
+		return
+	}
 	pageInfo := common.GetPageQuery(c)
 	userId, _ := strconv.Atoi(c.Query("user_id"))
 	items, total, err := model.ListInvoiceRecords(c.Query("keyword"), userId, pageInfo)
@@ -251,9 +271,16 @@ func GetAdminInvoiceRecords(c *gin.Context) {
 }
 
 func IssueInvoiceRecord(c *gin.Context) {
+	if !ensureInvoiceAdmin(c) {
+		return
+	}
 	var req invoiceIssueRequest
 	if err := common.DecodeJson(c.Request.Body, &req); err != nil {
 		common.ApiError(c, err)
+		return
+	}
+	if strings.TrimSpace(req.InvoiceNo) == "" {
+		common.ApiErrorMsg(c, "invoice number is required")
 		return
 	}
 	record, err := model.IssueInvoiceRecord(req.ApplicationIds, c.GetInt("id"), req.InvoiceNo, req.FileURL, req.Remark)
@@ -265,6 +292,9 @@ func IssueInvoiceRecord(c *gin.Context) {
 }
 
 func VoidInvoiceRecord(c *gin.Context) {
+	if !ensureInvoiceAdmin(c) {
+		return
+	}
 	id, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
 		common.ApiErrorMsg(c, "invalid invoice record id")

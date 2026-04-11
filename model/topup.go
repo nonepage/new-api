@@ -42,12 +42,12 @@ func (topUp *TopUp) BeforeCreate(tx *gorm.DB) error {
 
 func (topUp *TopUp) GetEffectivePaidAmount() float64 {
 	if topUp.PaidAmount > 0 {
-		return topUp.PaidAmount
+		return decimal.NewFromFloat(topUp.PaidAmount).Round(6).InexactFloat64()
 	}
 	if topUp.Money > 0 {
-		return topUp.Money
+		return decimal.NewFromFloat(topUp.Money).Round(6).InexactFloat64()
 	}
-	return float64(topUp.Amount)
+	return decimal.NewFromInt(topUp.Amount).Round(6).InexactFloat64()
 }
 
 func (topUp *TopUp) GetEffectiveCurrency() string {
