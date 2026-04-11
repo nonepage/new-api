@@ -296,7 +296,7 @@ func TokenAuth() func(c *gin.Context) {
 				c.Request.Header.Set("Authorization", "Bearer "+anthropicKey)
 			}
 		}
-		// gemini api 浠巕uery涓幏鍙杒ey
+		// gemini api 从query中获取key
 		if strings.HasPrefix(c.Request.URL.Path, "/v1beta/models") ||
 			strings.HasPrefix(c.Request.URL.Path, "/v1beta/openai/models") ||
 			strings.HasPrefix(c.Request.URL.Path, "/v1/models/") {
@@ -304,7 +304,7 @@ func TokenAuth() func(c *gin.Context) {
 			if skKey != "" {
 				c.Request.Header.Set("Authorization", "Bearer "+skKey)
 			}
-			// 浠巟-goog-api-key header涓幏鍙杒ey
+			// 从x-goog-api-key header中获取key
 			xGoogKey := c.Request.Header.Get("x-goog-api-key")
 			if xGoogKey != "" {
 				c.Request.Header.Set("Authorization", "Bearer "+xGoogKey)

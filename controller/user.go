@@ -60,7 +60,7 @@ func Login(c *gin.Context) {
 
 	// 检查是否启用2FA
 	if model.IsTwoFAEnabled(user.Id) {
-		// 璁剧疆pending session锛岀瓑寰?FA楠岃瘉
+		// 设置pending session，等待2FA验证
 		session := sessions.Default(c)
 		session.Set("pending_username", user.Username)
 		session.Set("pending_user_id", user.Id)
@@ -209,8 +209,8 @@ func Register(c *gin.Context) {
 			Key:                key,
 			CreatedTime:        common.GetTimestamp(),
 			AccessedTime:       common.GetTimestamp(),
-			ExpiredTime:        -1,     // 姘镐笉杩囨湡
-			RemainQuota:        500000, // 绀轰緥棰濆害
+			ExpiredTime:        -1,     // 永不过期
+			RemainQuota:        500000, // 示例额度
 			UnlimitedQuota:     true,
 			ModelLimitsEnabled: false,
 		}
@@ -439,7 +439,7 @@ func GetSelf(c *gin.Context) {
 		"linux_do_id":                  user.LinuxDOId,
 		"setting":                      user.Setting,
 		"stripe_customer":              user.StripeCustomer,
-		"sidebar_modules":              userSetting.SidebarModules, // 姝ｇ‘鎻愬彇sidebar_modules瀛楁
+		"sidebar_modules":              userSetting.SidebarModules, // 正确提取sidebar_modules字段
 		"permissions":                  permissions,                // 新增权限字段
 	}
 
@@ -718,7 +718,7 @@ func UpdateSelf(c *gin.Context) {
 		return
 	}
 
-	// 鍘熸湁鐨勭敤鎴蜂俊鎭洿鏂伴€昏緫
+	// 原有的用户信息更新逻辑
 	var user model.User
 	requestDataBytes, err := common.Marshal(requestData)
 	if err != nil {
@@ -774,7 +774,7 @@ func checkUpdatePassword(originalPassword string, newPassword string, userId int
 	}
 
 	// 密码不为空，需要验证原密码
-	// 鏀寔绗竴娆¤处鍙风粦瀹氭椂鍘熷瘑鐮佷负绌虹殑鎯呭喌
+	// 支持第一次账户绑定时原密码为空的情况
 	if !common.ValidatePasswordAndHash(originalPassword, currentUser.Password) && currentUser.Password != "" {
 		err = fmt.Errorf("original password is incorrect")
 		return
@@ -1099,7 +1099,7 @@ func UpdateUserSetting(c *gin.Context) {
 		return
 	}
 
-	// 楠岃瘉棰勮绫诲瀷
+	// 验证预警类型
 	if req.QuotaWarningType != dto.NotifyTypeEmail && req.QuotaWarningType != dto.NotifyTypeWebhook && req.QuotaWarningType != dto.NotifyTypeBark && req.QuotaWarningType != dto.NotifyTypeGotify {
 		common.ApiErrorI18n(c, i18n.MsgSettingInvalidType)
 		return
@@ -1110,22 +1110,22 @@ func UpdateUserSetting(c *gin.Context) {
 		return
 	}
 
-	// 濡傛灉鏄痺ebhook绫诲瀷,楠岃瘉webhook鍦板潃
+	// 如果是webhook类型，验证webhook地址
 	if req.QuotaWarningType == dto.NotifyTypeWebhook {
 		if req.WebhookUrl == "" {
 			common.ApiErrorI18n(c, i18n.MsgSettingWebhookEmpty)
 			return
 		}
-		// 楠岃瘉URL鏍煎紡
+		// 验证URL格式
 		if _, err := url.ParseRequestURI(req.WebhookUrl); err != nil {
 			common.ApiErrorI18n(c, i18n.MsgSettingWebhookInvalid)
 			return
 		}
 	}
 
-	// 濡傛灉鏄偖浠剁被鍨嬶紝楠岃瘉閭鍦板潃
+	// 如果是邮件类型，验证邮箱地址
 	if req.QuotaWarningType == dto.NotifyTypeEmail && req.NotificationEmail != "" {
-		// 楠岃瘉閭鏍煎紡
+		// 验证邮箱格式
 		if !strings.Contains(req.NotificationEmail, "@") {
 			common.ApiErrorI18n(c, i18n.MsgSettingEmailInvalid)
 			return
@@ -1138,7 +1138,7 @@ func UpdateUserSetting(c *gin.Context) {
 			common.ApiErrorI18n(c, i18n.MsgSettingBarkUrlEmpty)
 			return
 		}
-		// 楠岃瘉URL鏍煎紡
+		// 验证URL格式
 		if _, err := url.ParseRequestURI(req.BarkUrl); err != nil {
 			common.ApiErrorI18n(c, i18n.MsgSettingBarkUrlInvalid)
 			return
@@ -1160,7 +1160,7 @@ func UpdateUserSetting(c *gin.Context) {
 			common.ApiErrorI18n(c, i18n.MsgSettingGotifyTokenEmpty)
 			return
 		}
-		// 楠岃瘉URL鏍煎紡
+		// 验证URL格式
 		if _, err := url.ParseRequestURI(req.GotifyUrl); err != nil {
 			common.ApiErrorI18n(c, i18n.MsgSettingGotifyUrlInvalid)
 			return
@@ -1193,7 +1193,7 @@ func UpdateUserSetting(c *gin.Context) {
 		RecordIpLog:                      req.RecordIpLog,
 	}
 
-	// 濡傛灉鏄痺ebhook绫诲瀷,娣诲姞webhook鐩稿叧璁剧疆
+	// 如果是webhook类型，添加webhook相关设置
 	if req.QuotaWarningType == dto.NotifyTypeWebhook {
 		settings.WebhookUrl = req.WebhookUrl
 		if req.WebhookSecret != "" {
@@ -1205,12 +1205,12 @@ func UpdateUserSetting(c *gin.Context) {
 		settings.NotificationEmail = req.NotificationEmail
 	}
 
-	// 濡傛灉鏄疊ark绫诲瀷锛屾坊鍔燘ark URL鍒拌缃腑
+	// 如果是Bark类型，添加Bark URL到设置中
 	if req.QuotaWarningType == dto.NotifyTypeBark {
 		settings.BarkUrl = req.BarkUrl
 	}
 
-	// 濡傛灉鏄疓otify绫诲瀷锛屾坊鍔燝otify閰嶇疆鍒拌缃腑
+	// 如果是Gotify类型，添加Gotify配置到设置中
 	if req.QuotaWarningType == dto.NotifyTypeGotify {
 		settings.GotifyUrl = req.GotifyUrl
 		settings.GotifyToken = req.GotifyToken

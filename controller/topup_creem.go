@@ -33,7 +33,7 @@ func generateCreemSignature(payload string, secret string) string {
 	return hex.EncodeToString(h.Sum(nil))
 }
 
-// 楠岃瘉Creem webhook绛惧悕
+// 验证Creem webhook签名
 func verifyCreemSignature(payload string, signature string, secret string) bool {
 	if secret == "" {
 		log.Printf("Creem Webhook secret is not configured")
@@ -150,10 +150,10 @@ func RequestCreemPay(c *gin.Context) {
 		return
 	}
 
-	// 鎵撳嵃body鍐呭
+	// 打印body内容
 	log.Printf("creem pay request body: %s", string(bodyBytes))
 
-	// 閲嶆柊璁剧疆body渚涘悗缁殑ShouldBindJSON浣跨敤
+	// 重新设置body供后续的ShouldBindJSON使用
 	c.Request.Body = io.NopCloser(bytes.NewReader(bodyBytes))
 
 	err = c.ShouldBindJSON(&req)
@@ -164,7 +164,7 @@ func RequestCreemPay(c *gin.Context) {
 	creemAdaptor.RequestPay(c, &req)
 }
 
-// 鏂扮殑Creem Webhook缁撴瀯浣擄紝鍖归厤瀹為檯鐨剋ebhook鏁版嵁鏍煎紡
+// 新的Creem Webhook结构体，匹配实际的webhook数据格式
 type CreemWebhookEvent struct {
 	Id        string `json:"id"`
 	EventType string `json:"eventType"`
@@ -245,7 +245,7 @@ func CreemWebhook(c *gin.Context) {
 		return
 	}
 
-	// 楠岃瘉绛惧悕
+	// 验证签名
 	if !verifyCreemSignature(string(bodyBytes), signature, setting.CreemWebhookSecret) {
 		log.Printf("Creem Webhook signature verification failed")
 		c.AbortWithStatus(http.StatusUnauthorized)
@@ -254,7 +254,7 @@ func CreemWebhook(c *gin.Context) {
 
 	log.Printf("Creem Webhook signature verified")
 
-	// 閲嶆柊璁剧疆body渚涘悗缁殑ShouldBindJSON浣跨敤
+	// 重新设置body供后续的ShouldBindJSON使用
 	c.Request.Body = io.NopCloser(bytes.NewReader(bodyBytes))
 
 	// 解析webhook数据
@@ -267,7 +267,7 @@ func CreemWebhook(c *gin.Context) {
 
 	log.Printf("Creem Webhook parsed - EventType: %s, EventId: %s", webhookEvent.EventType, webhookEvent.Id)
 
-	// 鏍规嵁浜嬩欢绫诲瀷澶勭悊涓嶅悓鐨剋ebhook
+	// 根据事件类型处理不同的webhook
 	switch webhookEvent.EventType {
 	case "checkout.completed":
 		handleCheckoutCompleted(c, &webhookEvent)
@@ -277,7 +277,7 @@ func CreemWebhook(c *gin.Context) {
 	}
 }
 
-// 澶勭悊鏀粯瀹屾垚浜嬩欢
+// 处理支付完成事件
 func handleCheckoutCompleted(c *gin.Context, event *CreemWebhookEvent) {
 	if event.Object.Order.Status != "paid" {
 		log.Printf("skip Creem order with status %s", event.Object.Order.Status)
