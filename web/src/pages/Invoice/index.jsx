@@ -6,6 +6,7 @@ import {
   Empty,
   Form,
   Input,
+  Modal,
   Select,
   Table,
   Tabs,
@@ -14,8 +15,17 @@ import {
 } from '@douyinfe/semi-ui';
 import { useTranslation } from 'react-i18next';
 import { API, showError, showSuccess } from '../../helpers';
+import {
+  copyInvoiceApplicationInfo,
+  formatAmount,
+  formatTime,
+  InvoiceApplicationDetails,
+  renderInvoiceProfileSummary,
+  renderInvoiceStatusTag,
+} from './invoiceShared';
 
 const { TabPane } = Tabs;
+
 const defaultProfileForm = {
   type: 'personal',
   title: '',
@@ -28,13 +38,10 @@ const defaultProfileForm = {
   is_default: false,
 };
 
-const formatAmount = (amount, currency) =>
-  `${Number(amount || 0).toFixed(2)} ${currency || ''}`.trim();
-
-const formatTime = (timestamp) => {
-  if (!timestamp) return '-';
-  return new Date(timestamp * 1000).toLocaleString();
-};
+const hasRequiredInvoiceFields = (profile) =>
+  !!profile?.title?.trim() &&
+  !!profile?.tax_no?.trim() &&
+  !!profile?.email?.trim();
 
 const InvoicePage = () => {
   const { t } = useTranslation();
@@ -48,6 +55,7 @@ const InvoicePage = () => {
   const [selectedProfileId, setSelectedProfileId] = useState(undefined);
   const [applicationRemark, setApplicationRemark] = useState('');
   const [profileForm, setProfileForm] = useState(defaultProfileForm);
+  const [detailApplication, setDetailApplication] = useState(null);
 
   const loadData = async () => {
     setLoading(true);
@@ -78,10 +86,15 @@ const InvoicePage = () => {
       if (profilesRes.data.success) {
         const nextProfiles = profilesRes.data.data || [];
         setProfiles(nextProfiles);
-        const defaultProfile = nextProfiles.find((item) => item.is_default);
-        if (defaultProfile) {
-          setSelectedProfileId(defaultProfile.id);
-        }
+        setSelectedProfileId((currentId) => {
+          if (currentId && nextProfiles.some((item) => item.id === currentId)) {
+            return currentId;
+          }
+          return (
+            nextProfiles.find((item) => item.is_default)?.id ||
+            nextProfiles[0]?.id
+          );
+        });
       }
     } catch (error) {
       showError(error);
@@ -108,7 +121,10 @@ const InvoicePage = () => {
       {
         title: t('支付金额'),
         render: (_, record) =>
-          formatAmount(record.paid_amount || record.money || record.amount, record.paid_currency),
+          formatAmount(
+            record.paid_amount || record.money || record.amount,
+            record.paid_currency,
+          ),
       },
       {
         title: t('订单IP'),
@@ -117,7 +133,8 @@ const InvoicePage = () => {
       },
       {
         title: t('时间'),
-        render: (_, record) => formatTime(record.complete_time || record.create_time),
+        render: (_, record) =>
+          formatTime(record.complete_time || record.create_time),
       },
     ],
     [t],
@@ -132,11 +149,16 @@ const InvoicePage = () => {
       {
         title: t('状态'),
         dataIndex: 'status',
-        render: (value) => <Tag color='blue'>{value}</Tag>,
+        render: (value) => renderInvoiceStatusTag(value, t),
+      },
+      {
+        title: t('开票信息'),
+        render: (_, record) => renderInvoiceProfileSummary(record, t),
       },
       {
         title: t('金额'),
-        render: (_, record) => formatAmount(record.total_amount, record.currency),
+        render: (_, record) =>
+          formatAmount(record.total_amount, record.currency),
       },
       {
         title: t('订单数'),
@@ -148,35 +170,51 @@ const InvoicePage = () => {
         render: (value) => value || '-',
       },
       {
-        title: t('时间'),
+        title: t('提交时间'),
         render: (_, record) => formatTime(record.created_at),
       },
       {
         title: t('操作'),
         render: (_, record) => (
-          <Button
-            size='small'
-            type='danger'
-            theme='borderless'
-            disabled={record.status !== 'pending_review'}
-            onClick={async () => {
-              try {
-                const res = await API.post(
-                  `/api/invoice/application/${record.id}/cancel`,
-                );
-                if (res.data.success) {
-                  showSuccess(t('申请已取消'));
-                  loadData();
-                } else {
-                  showError(res.data.message);
+          <div className='flex flex-wrap gap-2'>
+            <Button
+              size='small'
+              theme='light'
+              onClick={() => setDetailApplication(record)}
+            >
+              {t('查看信息')}
+            </Button>
+            <Button
+              size='small'
+              theme='borderless'
+              onClick={() => copyInvoiceApplicationInfo(record, t)}
+            >
+              {t('复制信息')}
+            </Button>
+            <Button
+              size='small'
+              type='danger'
+              theme='borderless'
+              disabled={record.status !== 'pending_review'}
+              onClick={async () => {
+                try {
+                  const res = await API.post(
+                    `/api/invoice/application/${record.id}/cancel`,
+                  );
+                  if (res.data.success) {
+                    showSuccess(t('申请已取消'));
+                    loadData();
+                  } else {
+                    showError(res.data.message);
+                  }
+                } catch (error) {
+                  showError(error);
                 }
-              } catch (error) {
-                showError(error);
-              }
-            }}
-          >
-            {t('取消')}
-          </Button>
+              }}
+            >
+              {t('取消')}
+            </Button>
+          </div>
         ),
       },
     ],
@@ -196,7 +234,8 @@ const InvoicePage = () => {
       },
       {
         title: t('金额'),
-        render: (_, record) => formatAmount(record.total_amount, record.currency),
+        render: (_, record) =>
+          formatAmount(record.total_amount, record.currency),
       },
       {
         title: t('申请数'),
@@ -244,7 +283,9 @@ const InvoicePage = () => {
             theme='borderless'
             onClick={async () => {
               try {
-                const res = await API.delete(`/api/invoice/profile/${record.id}`);
+                const res = await API.delete(
+                  `/api/invoice/profile/${record.id}`,
+                );
                 if (res.data.success) {
                   showSuccess(t('资料已删除'));
                   loadData();
@@ -279,6 +320,11 @@ const InvoicePage = () => {
       showError(t('请先选择订单'));
       return;
     }
+    if (!selectedProfileId && !hasRequiredInvoiceFields(profileForm)) {
+      showError(t('开票抬头、税号、邮箱为必填项'));
+      return;
+    }
+
     setSubmitting(true);
     try {
       const payload = {
@@ -304,6 +350,11 @@ const InvoicePage = () => {
   };
 
   const saveProfile = async () => {
+    if (!hasRequiredInvoiceFields(profileForm)) {
+      showError(t('开票抬头、税号、邮箱为必填项'));
+      return;
+    }
+
     setSubmitting(true);
     try {
       const res = await API.post('/api/invoice/profile', profileForm);
@@ -326,7 +377,9 @@ const InvoicePage = () => {
       <Card bordered={false}>
         <Typography.Title heading={4}>{t('发票管理')}</Typography.Title>
         <Typography.Text type='secondary'>
-          {t('查看可开票订单、提交发票申请，并维护常用开票资料。')}
+          {t(
+            '查看可开票订单、提交发票申请，并维护常用开票资料。抬头、税号、邮箱为必填项，审核通过后即视为开票成功。',
+          )}
         </Typography.Text>
       </Card>
 
@@ -335,7 +388,9 @@ const InvoicePage = () => {
           <Banner
             type='info'
             closeIcon={null}
-            description={t('仅展示支付成功且尚未进入开票流程的订单。')}
+            description={t(
+              '仅展示支付成功且尚未进入开票流程的订单。提交时必须填写抬头、税号、邮箱。',
+            )}
           />
           <Card className='mt-4' loading={loading}>
             <div className='mb-4 flex flex-wrap gap-3'>
@@ -362,6 +417,7 @@ const InvoicePage = () => {
               </Button>
               <Button onClick={loadData}>{t('刷新')}</Button>
             </div>
+
             {!selectedProfileId && (
               <Form layout='horizontal' className='mb-4'>
                 <Form.Select
@@ -379,6 +435,7 @@ const InvoicePage = () => {
                 <Form.Input
                   field='title'
                   label={t('抬头')}
+                  placeholder={t('必填')}
                   value={profileForm.title}
                   onChange={(value) =>
                     setProfileForm((prev) => ({ ...prev, title: value }))
@@ -387,6 +444,7 @@ const InvoicePage = () => {
                 <Form.Input
                   field='tax_no'
                   label={t('税号')}
+                  placeholder={t('必填')}
                   value={profileForm.tax_no}
                   onChange={(value) =>
                     setProfileForm((prev) => ({ ...prev, tax_no: value }))
@@ -395,6 +453,7 @@ const InvoicePage = () => {
                 <Form.Input
                   field='email'
                   label={t('邮箱')}
+                  placeholder={t('必填，用于接收发票')}
                   value={profileForm.email}
                   onChange={(value) =>
                     setProfileForm((prev) => ({ ...prev, email: value }))
@@ -402,6 +461,7 @@ const InvoicePage = () => {
                 />
               </Form>
             )}
+
             <Table
               rowKey='id'
               columns={orderColumns}
@@ -419,6 +479,13 @@ const InvoicePage = () => {
         </TabPane>
 
         <TabPane tab={t('开票申请')} itemKey='applications'>
+          <Banner
+            type='info'
+            closeIcon={null}
+            description={t(
+              '每条申请都支持查看开票资料、订单明细，并可一键复制完整开票信息。审核通过后会直接进入开票成功。',
+            )}
+          />
           <Card className='mt-4' loading={loading}>
             <Table
               rowKey='id'
@@ -428,6 +495,7 @@ const InvoicePage = () => {
               empty={<Empty title={t('暂无申请记录')} />}
             />
           </Card>
+
           <Card className='mt-4' title={t('已开票记录')} loading={loading}>
             <Table
               rowKey='id'
@@ -457,6 +525,7 @@ const InvoicePage = () => {
               <Form.Input
                 field='title'
                 label={t('抬头')}
+                placeholder={t('必填')}
                 value={profileForm.title}
                 onChange={(value) =>
                   setProfileForm((prev) => ({ ...prev, title: value }))
@@ -465,6 +534,7 @@ const InvoicePage = () => {
               <Form.Input
                 field='tax_no'
                 label={t('税号')}
+                placeholder={t('必填')}
                 value={profileForm.tax_no}
                 onChange={(value) =>
                   setProfileForm((prev) => ({ ...prev, tax_no: value }))
@@ -473,6 +543,7 @@ const InvoicePage = () => {
               <Form.Input
                 field='email'
                 label={t('邮箱')}
+                placeholder={t('必填，用于接收发票')}
                 value={profileForm.email}
                 onChange={(value) =>
                   setProfileForm((prev) => ({ ...prev, email: value }))
@@ -507,7 +578,10 @@ const InvoicePage = () => {
                 label={t('银行账号')}
                 value={profileForm.bank_account}
                 onChange={(value) =>
-                  setProfileForm((prev) => ({ ...prev, bank_account: value }))
+                  setProfileForm((prev) => ({
+                    ...prev,
+                    bank_account: value,
+                  }))
                 }
               />
               <Button theme='solid' loading={submitting} onClick={saveProfile}>
@@ -515,6 +589,7 @@ const InvoicePage = () => {
               </Button>
             </Form>
           </Card>
+
           <Card className='mt-4' title={t('已保存资料')} loading={loading}>
             <Table
               rowKey='id'
@@ -526,6 +601,31 @@ const InvoicePage = () => {
           </Card>
         </TabPane>
       </Tabs>
+
+      <Modal
+        title={t('开票申请详情')}
+        visible={!!detailApplication}
+        onCancel={() => setDetailApplication(null)}
+        footer={
+          <div className='flex justify-end gap-2'>
+            <Button
+              theme='light'
+              onClick={() =>
+                detailApplication &&
+                copyInvoiceApplicationInfo(detailApplication, t)
+              }
+            >
+              {t('复制信息')}
+            </Button>
+            <Button onClick={() => setDetailApplication(null)}>
+              {t('关闭')}
+            </Button>
+          </div>
+        }
+        width={860}
+      >
+        <InvoiceApplicationDetails application={detailApplication} t={t} />
+      </Modal>
     </div>
   );
 };

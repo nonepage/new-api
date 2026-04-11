@@ -30,3 +30,5 @@ data/
 .gocache-temp
 .gopath
 db-backup-before-online-import-20260408-201511.sql
+db_new-api_20260408_013004_mysql_data.sql.gz
+error-v1-messages-2026-03-10T200846-e4edf114.log

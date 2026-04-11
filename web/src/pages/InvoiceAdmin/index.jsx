@@ -13,27 +13,24 @@ import {
 } from '@douyinfe/semi-ui';
 import { useTranslation } from 'react-i18next';
 import { API, showError, showSuccess } from '../../helpers';
+import {
+  copyInvoiceApplicationInfo,
+  formatAmount,
+  formatTime,
+  InvoiceApplicationDetails,
+  renderInvoiceProfileSummary,
+  renderInvoiceStatusTag,
+} from '../Invoice/invoiceShared';
 
 const { TabPane } = Tabs;
-
-const formatAmount = (amount, currency) =>
-  `${Number(amount || 0).toFixed(2)} ${currency || ''}`.trim();
-
-const formatTime = (timestamp) => {
-  if (!timestamp) return '-';
-  return new Date(timestamp * 1000).toLocaleString();
-};
 
 const InvoiceAdminPage = () => {
   const { t } = useTranslation();
   const [loading, setLoading] = useState(false);
-  const [issuing, setIssuing] = useState(false);
   const [applications, setApplications] = useState([]);
   const [records, setRecords] = useState([]);
-  const [selectedApplicationIds, setSelectedApplicationIds] = useState([]);
-  const [invoiceNo, setInvoiceNo] = useState('');
-  const [fileURL, setFileURL] = useState('');
   const [remark, setRemark] = useState('');
+  const [detailApplication, setDetailApplication] = useState(null);
 
   const loadData = async () => {
     setLoading(true);
@@ -69,6 +66,7 @@ const InvoiceAdminPage = () => {
     };
     if (action === 'reject') {
       let rejectedReason = '';
+      let confirmed = false;
       await new Promise((resolve) => {
         Modal.confirm({
           title: t('填写驳回原因'),
@@ -80,14 +78,17 @@ const InvoiceAdminPage = () => {
               }}
             />
           ),
-          onOk: resolve,
+          onOk: () => {
+            confirmed = true;
+            resolve();
+          },
           onCancel: resolve,
         });
       });
-      payload.rejected_reason = rejectedReason;
-      if (!rejectedReason) {
+      if (!confirmed || !rejectedReason) {
         return;
       }
+      payload.rejected_reason = rejectedReason;
     }
     try {
       const res = await API.post(
@@ -95,43 +96,17 @@ const InvoiceAdminPage = () => {
         payload,
       );
       if (res.data.success) {
-        showSuccess(action === 'approve' ? t('申请已通过') : t('申请已驳回'));
+        showSuccess(
+          action === 'approve'
+            ? t('申请已通过，并已直接标记为开票成功')
+            : t('申请已驳回'),
+        );
         loadData();
       } else {
         showError(res.data.message);
       }
     } catch (error) {
       showError(error);
-    }
-  };
-
-  const issueRecord = async () => {
-    if (selectedApplicationIds.length === 0) {
-      showError(t('请先选择申请单'));
-      return;
-    }
-    setIssuing(true);
-    try {
-      const res = await API.post('/api/invoice/admin/records', {
-        application_ids: selectedApplicationIds,
-        invoice_no: invoiceNo,
-        file_url: fileURL,
-        remark,
-      });
-      if (res.data.success) {
-        showSuccess(t('发票记录已生成'));
-        setSelectedApplicationIds([]);
-        setInvoiceNo('');
-        setFileURL('');
-        setRemark('');
-        loadData();
-      } else {
-        showError(res.data.message);
-      }
-    } catch (error) {
-      showError(error);
-    } finally {
-      setIssuing(false);
     }
   };
 
@@ -148,11 +123,16 @@ const InvoiceAdminPage = () => {
       {
         title: t('状态'),
         dataIndex: 'status',
-        render: (value) => <Tag color='blue'>{value}</Tag>,
+        render: (value) => renderInvoiceStatusTag(value, t),
+      },
+      {
+        title: t('开票信息'),
+        render: (_, record) => renderInvoiceProfileSummary(record, t),
       },
       {
         title: t('申请金额'),
-        render: (_, record) => formatAmount(record.total_amount, record.currency),
+        render: (_, record) =>
+          formatAmount(record.total_amount, record.currency),
       },
       {
         title: t('订单数'),
@@ -165,22 +145,34 @@ const InvoiceAdminPage = () => {
       {
         title: t('操作'),
         render: (_, record) => (
-          <div className='flex gap-2'>
+          <div className='flex flex-wrap gap-2'>
+            <Button
+              size='small'
+              theme='light'
+              onClick={() => setDetailApplication(record)}
+            >
+              {t('查看信息')}
+            </Button>
+            <Button
+              size='small'
+              theme='borderless'
+              onClick={() => copyInvoiceApplicationInfo(record, t)}
+            >
+              {t('复制信息')}
+            </Button>
             <Button
               size='small'
               theme='solid'
               disabled={record.status !== 'pending_review'}
               onClick={() => reviewAction(record.id, 'approve')}
             >
-              {t('通过')}
+              {t('通过并完成开票')}
             </Button>
             <Button
               size='small'
               type='danger'
               theme='borderless'
-              disabled={
-                !['pending_review', 'approved'].includes(record.status)
-              }
+              disabled={record.status !== 'pending_review'}
               onClick={() => reviewAction(record.id, 'reject')}
             >
               {t('驳回')}
@@ -209,7 +201,8 @@ const InvoiceAdminPage = () => {
       },
       {
         title: t('金额'),
-        render: (_, record) => formatAmount(record.total_amount, record.currency),
+        render: (_, record) =>
+          formatAmount(record.total_amount, record.currency),
       },
       {
         title: t('申请数'),
@@ -252,21 +245,14 @@ const InvoiceAdminPage = () => {
     [t],
   );
 
-  const rowSelection = {
-    selectedRowKeys: selectedApplicationIds,
-    getCheckboxProps: (record) => ({
-      disabled: record.status !== 'approved',
-      name: record.id,
-    }),
-    onChange: (keys) => setSelectedApplicationIds(keys),
-  };
-
   return (
     <div className='mt-[60px] px-2'>
       <Card bordered={false}>
         <Typography.Title heading={4}>{t('发票管理')}</Typography.Title>
         <Typography.Text type='secondary'>
-          {t('审核用户开票申请，并支持按用户合并生成正式发票记录。')}
+          {t(
+            '审核用户开票申请。抬头、税号、邮箱为必填项，通过后系统会直接记为开票成功，不再保留平台内发票附件存档。',
+          )}
         </Typography.Text>
       </Card>
 
@@ -275,56 +261,71 @@ const InvoiceAdminPage = () => {
           <Banner
             type='warning'
             closeIcon={null}
-            description={t('只有已通过审核的申请，才能被合并开票。')}
+            description={t(
+              '审批通过后会直接进入开票成功，并生成一条开票记录。平台不再提供单独的发票附件存档流程。',
+            )}
           />
           <Card className='mt-4' loading={loading}>
             <div className='mb-4 flex flex-wrap gap-3'>
               <Input
-                style={{ width: 220 }}
-                placeholder={t('发票号，可留空自动生成')}
-                value={invoiceNo}
-                onChange={setInvoiceNo}
-              />
-              <Input
                 style={{ width: 280 }}
-                placeholder={t('附件链接')}
-                value={fileURL}
-                onChange={setFileURL}
-              />
-              <Input
-                style={{ width: 240 }}
-                placeholder={t('备注')}
+                placeholder={t('审核备注')}
                 value={remark}
                 onChange={setRemark}
               />
-              <Button theme='solid' loading={issuing} onClick={issueRecord}>
-                {t('合并开票')}
-              </Button>
               <Button onClick={loadData}>{t('刷新')}</Button>
             </div>
             <Table
               rowKey='id'
               columns={applicationColumns}
               dataSource={applications}
-              rowSelection={rowSelection}
               pagination={false}
               empty={<Empty title={t('暂无申请单')} />}
             />
           </Card>
         </TabPane>
 
-        <TabPane tab={t('发票记录')} itemKey='records'>
+        <TabPane tab={t('开票记录')} itemKey='records'>
           <Card className='mt-4' loading={loading}>
             <Table
               rowKey='id'
               columns={recordColumns}
               dataSource={records}
               pagination={false}
-              empty={<Empty title={t('暂无发票记录')} />}
+              empty={<Empty title={t('暂无开票记录')} />}
             />
           </Card>
         </TabPane>
       </Tabs>
+
+      <Modal
+        title={t('开票申请详情')}
+        visible={!!detailApplication}
+        onCancel={() => setDetailApplication(null)}
+        footer={
+          <div className='flex justify-end gap-2'>
+            <Button
+              theme='light'
+              onClick={() =>
+                detailApplication &&
+                copyInvoiceApplicationInfo(detailApplication, t)
+              }
+            >
+              {t('复制信息')}
+            </Button>
+            <Button onClick={() => setDetailApplication(null)}>
+              {t('关闭')}
+            </Button>
+          </div>
+        }
+        width={860}
+      >
+        <InvoiceApplicationDetails
+          application={detailApplication}
+          t={t}
+          showUserId
+        />
+      </Modal>
     </div>
   );
 };
