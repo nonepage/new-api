@@ -79,6 +79,7 @@ const SubscriptionPlansCard = ({
   t,
   loading = false,
   plans = [],
+  userState,
   payMethods = [],
   enableOnlineTopUp = false,
   enableStripeTopUp = false,
@@ -115,6 +116,23 @@ const SubscriptionPlansCard = ({
     setPaying(false);
   };
 
+  const defaultUserGroup = 'default';
+  const currentUserGroup = userState?.user?.group || defaultUserGroup;
+  const hasActiveSubscription = activeSubscriptions.length > 0;
+  const hasAnySubscription = allSubscriptions.length > 0;
+  const needsBalanceGroupReset =
+    !hasActiveSubscription && currentUserGroup !== defaultUserGroup;
+  const canConvertOrReset = hasActiveSubscription || needsBalanceGroupReset;
+  const conversionActionLabel = hasActiveSubscription
+    ? t('一键折算并回到余额分组')
+    : t('一键回到余额分组');
+  const conversionModalTitle = hasActiveSubscription
+    ? t('确认折算并回到余额分组')
+    : t('确认回到余额分组');
+  const conversionConfirmText = hasActiveSubscription
+    ? t('确认折算并回组')
+    : t('确认回组');
+
   const handleRefresh = async () => {
     setRefreshing(true);
     try {
@@ -131,7 +149,11 @@ const SubscriptionPlansCard = ({
       if (res.data?.success) {
         const preview = res.data?.data;
         if (!preview?.summary?.can_convert) {
-          showError(t('当前没有可折算的有效套餐'));
+          showError(
+            needsBalanceGroupReset
+              ? t('当前无需回到余额分组')
+              : t('当前没有可折算的有效套餐'),
+          );
           return;
         }
         setConversionPreview(preview);
@@ -153,11 +175,14 @@ const SubscriptionPlansCard = ({
         request_id: buildRequestId(),
       });
       if (res.data?.success) {
+        const subscriptionCount = res.data?.data?.subscription_count || 0;
         showSuccess(
-          t('套餐折算并回到余额分组完成') +
-            `，${t('返还额度')} ${renderQuota(
-              res.data?.data?.total_refund_quota || 0,
-            )}`,
+          subscriptionCount > 0
+            ? t('套餐折算并回到余额分组完成') +
+                `，${t('返还额度')} ${renderQuota(
+                  res.data?.data?.total_refund_quota || 0,
+                )}`
+            : t('已回到余额分组'),
         );
         setPreviewVisible(false);
         setConversionPreview(null);
@@ -257,8 +282,6 @@ const SubscriptionPlansCard = ({
     }
   };
 
-  const hasActiveSubscription = activeSubscriptions.length > 0;
-  const hasAnySubscription = allSubscriptions.length > 0;
   const disableSubscriptionPreference = !hasActiveSubscription;
   const isSubscriptionPreference =
     billingPreference === 'subscription_first' ||
@@ -363,7 +386,7 @@ const SubscriptionPlansCard = ({
 
   const renderConversionModal = () => (
     <Modal
-      title={t('确认折算并回到余额分组')}
+      title={conversionModalTitle}
       visible={previewVisible}
       onCancel={() => {
         if (converting) return;
@@ -371,13 +394,15 @@ const SubscriptionPlansCard = ({
       }}
       onOk={handleConvertToWallet}
       confirmLoading={converting}
-      okText={t('确认折算并回组')}
+      okText={conversionConfirmText}
       cancelText={t('取消')}
       centered
     >
       <div className='space-y-3'>
         <div className='text-sm text-gray-600'>
-          {t('执行后将关闭当前所有有效套餐，并把剩余有效期折算成钱包余额。')}
+          {hasActiveSubscription
+            ? t('执行后将关闭当前所有有效套餐，并把剩余有效期折算成钱包余额。')
+            : t('当前没有有效套餐可折算，执行后将仅把用户分组恢复为余额分组。')}
         </div>
         <div className='text-sm text-gray-600'>
           {t('用户分组将恢复为余额分组')}{' '}
@@ -398,26 +423,28 @@ const SubscriptionPlansCard = ({
             {renderQuota(conversionPreview?.summary?.total_refund_quota || 0)}
           </div>
         </div>
-        <div className='max-h-64 overflow-y-auto rounded-lg border border-gray-200 p-3 space-y-3'>
-          {(conversionPreview?.items || []).map((item) => (
-            <div
-              key={item.user_subscription_id}
-              className='border-b border-gray-100 pb-3 last:border-b-0 last:pb-0'
-            >
-              <div className='font-medium text-sm'>{item.plan_title}</div>
-              <div className='text-xs text-gray-500'>
-                {t('剩余时长')}：{item.remaining_seconds} s
+        {(conversionPreview?.summary?.subscription_count || 0) > 0 && (
+          <div className='max-h-64 overflow-y-auto rounded-lg border border-gray-200 p-3 space-y-3'>
+            {(conversionPreview?.items || []).map((item) => (
+              <div
+                key={item.user_subscription_id}
+                className='border-b border-gray-100 pb-3 last:border-b-0 last:pb-0'
+              >
+                <div className='font-medium text-sm'>{item.plan_title}</div>
+                <div className='text-xs text-gray-500'>
+                  {t('剩余时长')}：{item.remaining_seconds} s
+                </div>
+                <div className='text-xs text-gray-500'>
+                  {t('折算比例')}：
+                  {(Number(item.refund_ratio || 0) * 100).toFixed(2)}%
+                </div>
+                <div className='text-xs text-gray-500'>
+                  {t('返还额度')}：{renderQuota(item.refund_quota || 0)}
+                </div>
               </div>
-              <div className='text-xs text-gray-500'>
-                {t('折算比例')}：
-                {(Number(item.refund_ratio || 0) * 100).toFixed(2)}%
-              </div>
-              <div className='text-xs text-gray-500'>
-                {t('返还额度')}：{renderQuota(item.refund_quota || 0)}
-              </div>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        )}
         <div className='text-xs text-red-500'>
           {t('该操作不可撤销，请确认后再继续。')}
         </div>
@@ -502,11 +529,11 @@ const SubscriptionPlansCard = ({
                   size='small'
                   theme='solid'
                   type='danger'
-                  disabled={!hasActiveSubscription}
+                  disabled={!canConvertOrReset}
                   loading={previewLoading}
                   onClick={openConversionPreview}
                 >
-                  {t('一键折算并回到余额分组')}
+                  {conversionActionLabel}
                 </Button>
                 <Select
                   value={displayBillingPreference}

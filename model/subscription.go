@@ -630,7 +630,38 @@ func syncUserGroupForActiveSubscriptionsTx(tx *gorm.DB, userId int, now int64) (
 	return syncUserGroupForActiveSubscriptionsWithFallbackTx(tx, userId, "", now)
 }
 
-func rewireSubscriptionFallbackChainBeforeDeleteTx(tx *gorm.DB, sub *UserSubscription) error {
+func syncUserGroupForEndedSubscriptionTx(tx *gorm.DB, userId int, fallbackGroup string, now int64) (string, bool, error) {
+	if userId <= 0 {
+		return "", false, errors.New("invalid userId")
+	}
+	if tx == nil {
+		tx = DB
+	}
+	var activeUpgradeCount int64
+	if err := tx.Model(&UserSubscription{}).
+		Where("user_id = ? AND status = ? AND end_time > ? AND upgrade_group <> ''", userId, SubscriptionStatusActive, now).
+		Count(&activeUpgradeCount).Error; err != nil {
+		return "", false, err
+	}
+	if activeUpgradeCount == 0 {
+		targetGroup := getDefaultUserGroupName()
+		currentGroup, err := getUserGroupByIdTx(tx, userId)
+		if err != nil {
+			return "", false, err
+		}
+		if currentGroup == targetGroup {
+			return targetGroup, false, nil
+		}
+		if err := tx.Model(&User{}).Where("id = ?", userId).
+			Update("group", targetGroup).Error; err != nil {
+			return "", false, err
+		}
+		return targetGroup, true, nil
+	}
+	return syncUserGroupForActiveSubscriptionsWithFallbackTx(tx, userId, fallbackGroup, now)
+}
+
+func rewireSubscriptionFallbackChainForEndedSubscriptionTx(tx *gorm.DB, sub *UserSubscription) error {
 	if sub == nil {
 		return errors.New("sub is nil")
 	}
@@ -645,6 +676,10 @@ func rewireSubscriptionFallbackChainBeforeDeleteTx(tx *gorm.DB, sub *UserSubscri
 	return tx.Model(&UserSubscription{}).
 		Where("user_id = ? AND id <> ? AND prev_user_group = ?", sub.UserId, sub.Id, upgradeGroup).
 		Update("prev_user_group", prevGroup).Error
+}
+
+func rewireSubscriptionFallbackChainBeforeDeleteTx(tx *gorm.DB, sub *UserSubscription) error {
+	return rewireSubscriptionFallbackChainForEndedSubscriptionTx(tx, sub)
 }
 
 func createUserSubscriptionFromPlanTx(tx *gorm.DB, userId int, plan *SubscriptionPlan, source string, purchasePriceAmount float64, purchaseCurrency string) (*UserSubscription, error) {
@@ -1134,7 +1169,7 @@ func buildSubscriptionConversionPreview(userGroupBefore string, userGroupAfter s
 			TotalRefundQuota:  totalRefundQuota,
 			UserGroupBefore:   userGroupBefore,
 			UserGroupAfter:    userGroupAfter,
-			CanConvert:        len(items) > 0,
+			CanConvert:        len(items) > 0 || strings.TrimSpace(userGroupBefore) != strings.TrimSpace(userGroupAfter),
 		},
 	}, nil
 }
@@ -1152,9 +1187,12 @@ func PreviewSubscriptionWalletConversion(userId int) (*SubscriptionConversionPre
 	if err != nil {
 		return nil, err
 	}
-	targetGroup, err := getSubscriptionBaseUserGroupTx(nil, userId, userGroup)
-	if err != nil {
-		return nil, err
+	targetGroup := getDefaultUserGroupName()
+	if len(entries) > 0 {
+		targetGroup, err = getSubscriptionBaseUserGroupTx(nil, userId, userGroup)
+		if err != nil {
+			return nil, err
+		}
 	}
 	return buildSubscriptionConversionPreview(userGroup, targetGroup, entries, now)
 }
@@ -1205,12 +1243,14 @@ func ExecuteSubscriptionWalletConversion(userId int, requestId string) (*Subscri
 		if err != nil {
 			return err
 		}
-		if len(entries) == 0 {
+		targetGroup := getDefaultUserGroupName()
+		if len(entries) > 0 {
+			targetGroup, err = getSubscriptionBaseUserGroupTx(tx, userId, userGroup)
+			if err != nil {
+				return err
+			}
+		} else if strings.TrimSpace(userGroup) == strings.TrimSpace(targetGroup) {
 			return errors.New("no active subscriptions to convert")
-		}
-		targetGroup, err := getSubscriptionBaseUserGroupTx(tx, userId, userGroup)
-		if err != nil {
-			return err
 		}
 		preview, err := buildSubscriptionConversionPreview(userGroup, targetGroup, entries, now)
 		if err != nil {
@@ -1274,21 +1314,23 @@ func ExecuteSubscriptionWalletConversion(userId int, requestId string) (*Subscri
 			}
 		}
 
-		res := tx.Model(&UserSubscription{}).
-			Where("user_id = ? AND status = ? AND end_time > ? AND id IN ?", userId, SubscriptionStatusActive, now, subscriptionIds).
-			Updates(map[string]interface{}{
-				"status":              SubscriptionStatusCancelled,
-				"cancel_reason":       SubscriptionCancelReasonWalletConversion,
-				"cancelled_at":        now,
-				"end_time":            now,
-				"conversion_batch_id": batch.Id,
-				"updated_at":          common.GetTimestamp(),
-			})
-		if res.Error != nil {
-			return res.Error
-		}
-		if res.RowsAffected != int64(len(subscriptionIds)) {
-			return errors.New("active subscriptions changed, please retry")
+		if len(subscriptionIds) > 0 {
+			res := tx.Model(&UserSubscription{}).
+				Where("user_id = ? AND status = ? AND end_time > ? AND id IN ?", userId, SubscriptionStatusActive, now, subscriptionIds).
+				Updates(map[string]interface{}{
+					"status":              SubscriptionStatusCancelled,
+					"cancel_reason":       SubscriptionCancelReasonWalletConversion,
+					"cancelled_at":        now,
+					"end_time":            now,
+					"conversion_batch_id": batch.Id,
+					"updated_at":          common.GetTimestamp(),
+				})
+			if res.Error != nil {
+				return res.Error
+			}
+			if res.RowsAffected != int64(len(subscriptionIds)) {
+				return errors.New("active subscriptions changed, please retry")
+			}
 		}
 
 		if preview.Summary.TotalRefundQuota > 0 {
@@ -1324,12 +1366,16 @@ func ExecuteSubscriptionWalletConversion(userId int, requestId string) (*Subscri
 			UserGroupAfter:    targetGroup,
 			NewUserQuota:      newQuota,
 		}
-		logMessage = fmt.Sprintf("套餐转余额成功，共转换 %d 个有效套餐，返还额度 %s，用户分组从 %s 回退到 %s",
-			preview.Summary.SubscriptionCount,
-			logger.FormatQuota(int(preview.Summary.TotalRefundQuota)),
-			userGroup,
-			targetGroup,
-		)
+		if preview.Summary.SubscriptionCount > 0 {
+			logMessage = fmt.Sprintf("套餐转余额成功，共转换 %d 个有效套餐，返还额度 %s，用户分组从 %s 回退到 %s",
+				preview.Summary.SubscriptionCount,
+				logger.FormatQuota(int(preview.Summary.TotalRefundQuota)),
+				userGroup,
+				targetGroup,
+			)
+		} else {
+			logMessage = fmt.Sprintf("用户无有效套餐可折算，用户分组从 %s 回退到 %s", userGroup, targetGroup)
+		}
 		return nil
 	})
 	if err != nil {
@@ -1366,6 +1412,9 @@ func AdminInvalidateUserSubscription(userSubscriptionId int) (string, error) {
 			return err
 		}
 		userId = sub.UserId
+		if err := rewireSubscriptionFallbackChainForEndedSubscriptionTx(tx, &sub); err != nil {
+			return err
+		}
 		if err := tx.Model(&sub).Updates(map[string]interface{}{
 			"status":     "cancelled",
 			"end_time":   now,
@@ -1373,7 +1422,7 @@ func AdminInvalidateUserSubscription(userSubscriptionId int) (string, error) {
 		}).Error; err != nil {
 			return err
 		}
-		target, changed, err := syncUserGroupForActiveSubscriptionsTx(tx, sub.UserId, now)
+		target, changed, err := syncUserGroupForEndedSubscriptionTx(tx, sub.UserId, "", now)
 		if err != nil {
 			return err
 		}
@@ -1473,18 +1522,44 @@ func ExpireDueSubscriptions(limit int) (int, error) {
 	for userId := range userIds {
 		cacheGroup := ""
 		err := DB.Transaction(func(tx *gorm.DB) error {
-			res := tx.Model(&UserSubscription{}).
+			var dueSubs []UserSubscription
+			if err := withRowLock(tx).
 				Where("user_id = ? AND status = ? AND end_time > 0 AND end_time <= ?", userId, "active", now).
+				Order("created_at asc, id asc").
+				Find(&dueSubs).Error; err != nil {
+				return err
+			}
+			if len(dueSubs) == 0 {
+				return nil
+			}
+			subscriptionIds := make([]int, 0, len(dueSubs))
+			for _, sub := range dueSubs {
+				subscriptionIds = append(subscriptionIds, sub.Id)
+			}
+			if err := tx.Model(&UserSubscription{}).
+				Where("id IN ?", subscriptionIds).
 				Updates(map[string]interface{}{
 					"status":     "expired",
 					"updated_at": common.GetTimestamp(),
-				})
-			if res.Error != nil {
-				return res.Error
+				}).Error; err != nil {
+				return err
 			}
-			expiredCount += int(res.RowsAffected)
+			expiredCount += len(dueSubs)
+			for i, sub := range dueSubs {
+				if err := rewireSubscriptionFallbackChainForEndedSubscriptionTx(tx, &sub); err != nil {
+					return err
+				}
+				if sub.UpgradeGroup == "" || sub.PrevUserGroup == "" {
+					continue
+				}
+				for j := i + 1; j < len(dueSubs); j++ {
+					if dueSubs[j].PrevUserGroup == sub.UpgradeGroup {
+						dueSubs[j].PrevUserGroup = sub.PrevUserGroup
+					}
+				}
+			}
 
-			targetGroup, changed, err := syncUserGroupForActiveSubscriptionsTx(tx, userId, now)
+			targetGroup, changed, err := syncUserGroupForEndedSubscriptionTx(tx, userId, "", now)
 			if err != nil {
 				return err
 			}
