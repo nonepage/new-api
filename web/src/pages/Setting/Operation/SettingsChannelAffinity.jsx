@@ -722,9 +722,7 @@ export default function SettingsChannelAffinity(props) {
         ttl_seconds: Number(values.ttl_seconds || 0),
         include_using_group: !!values.include_using_group,
         include_rule_name: !!values.include_rule_name,
-        ...(values.skip_retry_on_failure
-          ? { skip_retry_on_failure: true }
-          : {}),
+        skip_retry_on_failure: !!values.skip_retry_on_failure,
         ...(userAgentInclude.length > 0
           ? { user_agent_include: userAgentInclude }
           : {}),
