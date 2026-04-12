@@ -99,18 +99,10 @@ const RechargeCard = ({
 }) => {
   const onlineFormApiRef = useRef(null);
   const redeemFormApiRef = useRef(null);
-  const initialTabSetRef = useRef(false);
   const showAmountSkeleton = useMinimumLoadingTime(amountLoading);
   const [activeTab, setActiveTab] = useState('topup');
   const shouldShowSubscription =
     !subscriptionLoading && subscriptionPlans.length > 0;
-
-  useEffect(() => {
-    if (initialTabSetRef.current) return;
-    if (subscriptionLoading) return;
-    setActiveTab(shouldShowSubscription ? 'subscription' : 'topup');
-    initialTabSetRef.current = true;
-  }, [shouldShowSubscription, subscriptionLoading]);
 
   useEffect(() => {
     if (!shouldShowSubscription && activeTab !== 'topup') {
@@ -120,28 +112,20 @@ const RechargeCard = ({
 
   const tabOptions = [
     {
-      key: 'subscription',
-      label: t('订阅套餐'),
-      description: t('购买订阅套餐'),
-      icon: Sparkles,
-      accentColor: '#2563eb',
-      activeBackground:
-        'linear-gradient(135deg, rgba(37, 99, 235, 0.96), rgba(14, 165, 233, 0.92))',
-      inactiveBackground:
-        'linear-gradient(135deg, rgba(37, 99, 235, 0.08), rgba(14, 165, 233, 0.16))',
-      activeShadow: '0 18px 36px rgba(37, 99, 235, 0.18)',
-    },
-    {
       key: 'topup',
       label: t('额度充值'),
       description: t('账户充值'),
       icon: Wallet,
-      accentColor: '#059669',
-      activeBackground:
-        'linear-gradient(135deg, rgba(5, 150, 105, 0.96), rgba(16, 185, 129, 0.92))',
-      inactiveBackground:
-        'linear-gradient(135deg, rgba(5, 150, 105, 0.08), rgba(16, 185, 129, 0.16))',
-      activeShadow: '0 18px 36px rgba(5, 150, 105, 0.18)',
+      iconColor: 'var(--semi-color-primary)',
+      activeBackground: 'var(--semi-color-primary-light-default)',
+    },
+    {
+      key: 'subscription',
+      label: t('订阅套餐'),
+      description: t('购买订阅套餐'),
+      icon: Sparkles,
+      iconColor: 'var(--semi-color-warning)',
+      activeBackground: 'rgba(245, 158, 11, 0.12)',
     },
   ];
   const topupContent = (
@@ -669,50 +653,54 @@ const RechargeCard = ({
 
       {shouldShowSubscription ? (
         <div>
-          <div className='grid grid-cols-1 gap-3 mb-5 sm:grid-cols-2'>
+          <div
+            className='grid grid-cols-2 gap-2 mb-5 rounded-2xl p-2'
+            style={{
+              background: 'var(--semi-color-fill-0)',
+              border: '1px solid var(--semi-color-border)',
+            }}
+          >
             {tabOptions.map((tabOption) => {
               const isActive = activeTab === tabOption.key;
               const Icon = tabOption.icon;
 
               return (
-                <button
+                <Button
                   key={tabOption.key}
-                  type='button'
                   onClick={() => setActiveTab(tabOption.key)}
-                  className='w-full rounded-2xl border px-4 py-4 text-left transition-all duration-200'
+                  theme='borderless'
+                  type='tertiary'
+                  className='!h-auto !w-full !rounded-xl !px-4 !py-3 !justify-start'
                   style={{
-                    borderColor: isActive
-                      ? tabOption.accentColor
-                      : 'rgba(148, 163, 184, 0.28)',
+                    border: isActive
+                      ? '1px solid var(--semi-color-primary)'
+                      : '1px solid transparent',
                     background: isActive
                       ? tabOption.activeBackground
-                      : tabOption.inactiveBackground,
+                      : 'transparent',
                     boxShadow: isActive
-                      ? tabOption.activeShadow
-                      : '0 10px 24px rgba(15, 23, 42, 0.06)',
-                    transform: isActive ? 'translateY(-1px)' : 'none',
+                      ? '0 6px 18px rgba(15, 23, 42, 0.08)'
+                      : 'none',
                   }}
                 >
-                  <div className='flex items-center gap-3'>
+                  <div className='flex w-full items-center gap-3'>
                     <div
                       className='flex h-11 w-11 shrink-0 items-center justify-center rounded-xl'
                       style={{
                         background: isActive
-                          ? 'rgba(255, 255, 255, 0.18)'
-                          : 'rgba(255, 255, 255, 0.72)',
-                        color: isActive ? '#ffffff' : tabOption.accentColor,
-                        border: isActive
-                          ? '1px solid rgba(255, 255, 255, 0.2)'
-                          : `1px solid ${tabOption.accentColor}22`,
+                          ? 'rgba(255, 255, 255, 0.9)'
+                          : 'var(--semi-color-bg-1)',
+                        color: tabOption.iconColor,
+                        border: '1px solid var(--semi-color-border)',
                       }}
                     >
                       <Icon size={18} />
                     </div>
-                    <div className='min-w-0'>
+                    <div className='min-w-0 text-left'>
                       <div
                         className='text-sm font-semibold'
                         style={{
-                          color: isActive ? '#ffffff' : 'var(--semi-color-text-0)',
+                          color: 'var(--semi-color-text-0)',
                         }}
                       >
                         {tabOption.label}
@@ -720,16 +708,14 @@ const RechargeCard = ({
                       <div
                         className='mt-1 text-xs'
                         style={{
-                          color: isActive
-                            ? 'rgba(255, 255, 255, 0.82)'
-                            : 'var(--semi-color-text-1)',
+                          color: 'var(--semi-color-text-2)',
                         }}
                       >
                         {tabOption.description}
                       </div>
                     </div>
                   </div>
-                </button>
+                </Button>
               );
             })}
           </div>
