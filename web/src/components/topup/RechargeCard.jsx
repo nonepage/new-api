@@ -32,8 +32,6 @@ import {
   Col,
   Spin,
   Tooltip,
-  Tabs,
-  TabPane,
 } from '@douyinfe/semi-ui';
 import { SiAlipay, SiWechat, SiStripe } from 'react-icons/si';
 import {
@@ -119,6 +117,33 @@ const RechargeCard = ({
       setActiveTab('topup');
     }
   }, [shouldShowSubscription, activeTab]);
+
+  const tabOptions = [
+    {
+      key: 'subscription',
+      label: t('订阅套餐'),
+      description: t('购买订阅套餐'),
+      icon: Sparkles,
+      accentColor: '#2563eb',
+      activeBackground:
+        'linear-gradient(135deg, rgba(37, 99, 235, 0.96), rgba(14, 165, 233, 0.92))',
+      inactiveBackground:
+        'linear-gradient(135deg, rgba(37, 99, 235, 0.08), rgba(14, 165, 233, 0.16))',
+      activeShadow: '0 18px 36px rgba(37, 99, 235, 0.18)',
+    },
+    {
+      key: 'topup',
+      label: t('额度充值'),
+      description: t('账户充值'),
+      icon: Wallet,
+      accentColor: '#059669',
+      activeBackground:
+        'linear-gradient(135deg, rgba(5, 150, 105, 0.96), rgba(16, 185, 129, 0.92))',
+      inactiveBackground:
+        'linear-gradient(135deg, rgba(5, 150, 105, 0.08), rgba(16, 185, 129, 0.16))',
+      activeShadow: '0 18px 36px rgba(5, 150, 105, 0.18)',
+    },
+  ];
   const topupContent = (
     <Space vertical style={{ width: '100%' }}>
       {/* 统计数据 */}
@@ -643,16 +668,73 @@ const RechargeCard = ({
       </div>
 
       {shouldShowSubscription ? (
-        <Tabs type='card' activeKey={activeTab} onChange={setActiveTab}>
-          <TabPane
-            tab={
-              <div className='flex items-center gap-2'>
-                <Sparkles size={16} />
-                {t('订阅套餐')}
-              </div>
-            }
-            itemKey='subscription'
-          >
+        <div>
+          <div className='grid grid-cols-1 gap-3 mb-5 sm:grid-cols-2'>
+            {tabOptions.map((tabOption) => {
+              const isActive = activeTab === tabOption.key;
+              const Icon = tabOption.icon;
+
+              return (
+                <button
+                  key={tabOption.key}
+                  type='button'
+                  onClick={() => setActiveTab(tabOption.key)}
+                  className='w-full rounded-2xl border px-4 py-4 text-left transition-all duration-200'
+                  style={{
+                    borderColor: isActive
+                      ? tabOption.accentColor
+                      : 'rgba(148, 163, 184, 0.28)',
+                    background: isActive
+                      ? tabOption.activeBackground
+                      : tabOption.inactiveBackground,
+                    boxShadow: isActive
+                      ? tabOption.activeShadow
+                      : '0 10px 24px rgba(15, 23, 42, 0.06)',
+                    transform: isActive ? 'translateY(-1px)' : 'none',
+                  }}
+                >
+                  <div className='flex items-center gap-3'>
+                    <div
+                      className='flex h-11 w-11 shrink-0 items-center justify-center rounded-xl'
+                      style={{
+                        background: isActive
+                          ? 'rgba(255, 255, 255, 0.18)'
+                          : 'rgba(255, 255, 255, 0.72)',
+                        color: isActive ? '#ffffff' : tabOption.accentColor,
+                        border: isActive
+                          ? '1px solid rgba(255, 255, 255, 0.2)'
+                          : `1px solid ${tabOption.accentColor}22`,
+                      }}
+                    >
+                      <Icon size={18} />
+                    </div>
+                    <div className='min-w-0'>
+                      <div
+                        className='text-sm font-semibold'
+                        style={{
+                          color: isActive ? '#ffffff' : 'var(--semi-color-text-0)',
+                        }}
+                      >
+                        {tabOption.label}
+                      </div>
+                      <div
+                        className='mt-1 text-xs'
+                        style={{
+                          color: isActive
+                            ? 'rgba(255, 255, 255, 0.82)'
+                            : 'var(--semi-color-text-1)',
+                        }}
+                      >
+                        {tabOption.description}
+                      </div>
+                    </div>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+
+          {activeTab === 'subscription' ? (
             <div className='py-2'>
               <SubscriptionPlansCard
                 t={t}
@@ -671,19 +753,10 @@ const RechargeCard = ({
                 withCard={false}
               />
             </div>
-          </TabPane>
-          <TabPane
-            tab={
-              <div className='flex items-center gap-2'>
-                <Wallet size={16} />
-                {t('额度充值')}
-              </div>
-            }
-            itemKey='topup'
-          >
+          ) : (
             <div className='py-2'>{topupContent}</div>
-          </TabPane>
-        </Tabs>
+          )}
+        </div>
       ) : (
         topupContent
       )}
