@@ -11,6 +11,7 @@ import {
   Tag,
   Table,
   Tabs,
+  Tooltip,
   Typography,
 } from '@douyinfe/semi-ui';
 import { useTranslation } from 'react-i18next';
@@ -26,6 +27,7 @@ import {
 
 const { TabPane } = Tabs;
 const DEFAULT_PAGE_SIZE = 20;
+const INVOICE_MIN_AMOUNT = 200;
 
 const defaultProfileForm = {
   type: 'personal',
@@ -43,6 +45,35 @@ const hasRequiredInvoiceFields = (profile) =>
   !!profile?.title?.trim() &&
   !!profile?.tax_no?.trim() &&
   !!profile?.email?.trim();
+
+const getInvoiceOrderDisabledReason = (order) =>
+  order?.source_type === 'subscription' ? '订阅订单暂不支持开具发票' : '';
+
+const getInvoiceOrderAmount = (order) => {
+  const paidAmount = Number(order?.paid_amount ?? 0);
+  if (paidAmount > 0) {
+    return paidAmount;
+  }
+  const money = Number(order?.money ?? 0);
+  if (money > 0) {
+    return money;
+  }
+  return Number(order?.amount ?? 0);
+};
+
+const getInvoiceOrderCurrency = (order) => {
+  const paidCurrency = String(order?.paid_currency || '').trim();
+  if (paidCurrency) {
+    return paidCurrency;
+  }
+  const paymentMethod = String(order?.payment_method || '')
+    .trim()
+    .toLowerCase();
+  if (paymentMethod === 'stripe' || paymentMethod === 'creem') {
+    return 'USD';
+  }
+  return 'CNY';
+};
 
 const InvoicePage = () => {
   const { t } = useTranslation();
@@ -155,7 +186,14 @@ const InvoicePage = () => {
       {
         title: t('支付方式'),
         dataIndex: 'payment_method',
-        render: (value) => value || '-',
+        render: (value, record) => (
+          <div className='flex flex-wrap items-center gap-2'>
+            <span>{value || '-'}</span>
+            {record?.source_type === 'subscription' ? (
+              <Tag color='orange'>{t('订阅')}</Tag>
+            ) : null}
+          </div>
+        ),
       },
       {
         title: t('支付金额'),
@@ -347,6 +385,26 @@ const InvoicePage = () => {
   const rowSelection = {
     selectedRowKeys: selectedOrderIds,
     onChange: (keys) => setSelectedOrderIds(keys),
+    getCheckboxProps: (record) => {
+      const disabledReason = getInvoiceOrderDisabledReason(record);
+      return {
+        disabled: !!disabledReason,
+      };
+    },
+    renderCell: ({ originNode, record, inHeader }) => {
+      if (inHeader) {
+        return originNode;
+      }
+      const disabledReason = getInvoiceOrderDisabledReason(record);
+      if (!disabledReason) {
+        return originNode;
+      }
+      return (
+        <Tooltip content={t(disabledReason)} position='top' showArrow>
+          <div className='inline-flex'>{originNode}</div>
+        </Tooltip>
+      );
+    },
   };
 
   const profileOptions = profiles.map((item) => ({
@@ -358,6 +416,31 @@ const InvoicePage = () => {
     if (selectedOrderIds.length === 0) {
       showError(t('请先选择订单'));
       return;
+    }
+    const selectedOrders = availableOrders.filter((order) =>
+      selectedOrderIds.includes(order.id),
+    );
+    if (selectedOrders.length === selectedOrderIds.length) {
+      const disabledOrder = selectedOrders.find((order) =>
+        getInvoiceOrderDisabledReason(order),
+      );
+      if (disabledOrder) {
+        showError(t(getInvoiceOrderDisabledReason(disabledOrder)));
+        return;
+      }
+      const currencies = new Set(
+        selectedOrders.map((order) => getInvoiceOrderCurrency(order)),
+      );
+      if (currencies.size === 1) {
+        const totalAmount = selectedOrders.reduce(
+          (sum, order) => sum + getInvoiceOrderAmount(order),
+          0,
+        );
+        if (totalAmount <= INVOICE_MIN_AMOUNT) {
+          showError(t('开票申请总金额需大于 200 元，请在金额满足条件后再提交申请。'));
+          return;
+        }
+      }
     }
     if (!selectedProfileId && !hasRequiredInvoiceFields(profileForm)) {
       showError(t('开票抬头、税号、邮箱为必填项'));
@@ -428,7 +511,7 @@ const InvoicePage = () => {
             type='info'
             closeIcon={null}
             description={t(
-              '仅展示支付成功且尚未进入开票流程的订单。提交时必须填写抬头、税号、邮箱。',
+              '仅展示支付成功且尚未进入开票流程的订单。订阅订单暂不支持开具发票，且开票申请总金额需大于 200 元。提交时必须填写抬头、税号、邮箱。',
             )}
           />
           <Card className='mt-4' loading={loading}>

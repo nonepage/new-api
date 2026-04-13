@@ -280,7 +280,7 @@ func TestCreateInvoiceApplication_UsesRoundedTotalsAndWritesAuditLog(t *testing.
 		UserId:        user.Id,
 		TradeNo:       "invoice-apply-topup-1",
 		Status:        common.TopUpStatusSuccess,
-		PaidAmount:    0.1,
+		PaidAmount:    100.1,
 		PaidCurrency:  "USD",
 		InvoiceStatus: common.InvoiceStatusNone,
 		PaymentMethod: "stripe",
@@ -292,7 +292,7 @@ func TestCreateInvoiceApplication_UsesRoundedTotalsAndWritesAuditLog(t *testing.
 		UserId:        user.Id,
 		TradeNo:       "invoice-apply-topup-2",
 		Status:        common.TopUpStatusSuccess,
-		PaidAmount:    0.2,
+		PaidAmount:    100.2,
 		PaidCurrency:  "USD",
 		InvoiceStatus: common.InvoiceStatusNone,
 		PaymentMethod: "stripe",
@@ -309,13 +309,73 @@ func TestCreateInvoiceApplication_UsesRoundedTotalsAndWritesAuditLog(t *testing.
 	}, "precision test")
 	require.NoError(t, err)
 	require.NotNil(t, application)
-	assert.Equal(t, "0.300000", decimal.NewFromFloat(application.TotalAmount).StringFixed(6))
+	assert.Equal(t, "200.300000", decimal.NewFromFloat(application.TotalAmount).StringFixed(6))
 
 	var logCount int64
 	require.NoError(t, DB.Model(&Log{}).
 		Where("user_id = ? AND type = ? AND content LIKE ?", user.Id, LogTypeSystem, "%submitted invoice application%").
 		Count(&logCount).Error)
 	assert.EqualValues(t, 1, logCount)
+}
+
+func TestCreateInvoiceApplication_RejectsSubscriptionOrders(t *testing.T) {
+	prepareReviewRegressionTest(t)
+
+	user := createReviewTestUser(t, "invoice-subscription-user", 0, "", "")
+	topup := &TopUp{
+		UserId:        user.Id,
+		TradeNo:       "invoice-subscription-topup",
+		Status:        common.TopUpStatusSuccess,
+		PaidAmount:    288,
+		PaidCurrency:  "CNY",
+		InvoiceStatus: common.InvoiceStatusNone,
+		PaymentMethod: "alipay",
+		SourceType:    common.TopUpSourceSubscription,
+		CreateTime:    time.Now().Unix(),
+		CompleteTime:  time.Now().Unix(),
+	}
+	require.NoError(t, DB.Create(topup).Error)
+
+	application, err := CreateInvoiceApplication(user.Id, []int{topup.Id}, InvoiceProfileSnapshot{
+		Type:  "company",
+		Title: "QuantumNous",
+		TaxNo: "TAX-SUB-001",
+		Email: "invoice@example.com",
+	}, "subscription should fail")
+	require.Nil(t, application)
+	require.EqualError(t, err, "订阅订单暂不支持开具发票")
+
+	var reloaded TopUp
+	require.NoError(t, DB.First(&reloaded, topup.Id).Error)
+	assert.Equal(t, common.InvoiceStatusNone, reloaded.InvoiceStatus)
+}
+
+func TestCreateInvoiceApplication_RejectsAmountAtOrBelowMinimum(t *testing.T) {
+	prepareReviewRegressionTest(t)
+
+	user := createReviewTestUser(t, "invoice-minimum-user", 0, "", "")
+	topup := &TopUp{
+		UserId:        user.Id,
+		TradeNo:       "invoice-minimum-topup",
+		Status:        common.TopUpStatusSuccess,
+		PaidAmount:    200,
+		PaidCurrency:  "CNY",
+		InvoiceStatus: common.InvoiceStatusNone,
+		PaymentMethod: "alipay",
+		SourceType:    common.TopUpSourceWalletTopUp,
+		CreateTime:    time.Now().Unix(),
+		CompleteTime:  time.Now().Unix(),
+	}
+	require.NoError(t, DB.Create(topup).Error)
+
+	application, err := CreateInvoiceApplication(user.Id, []int{topup.Id}, InvoiceProfileSnapshot{
+		Type:  "company",
+		Title: "QuantumNous",
+		TaxNo: "TAX-MIN-001",
+		Email: "invoice@example.com",
+	}, "amount threshold should fail")
+	require.Nil(t, application)
+	require.EqualError(t, err, "开票申请总金额需大于 200 元，请在金额满足条件后再提交申请。")
 }
 
 func TestApproveInvoiceApplication_WritesAdminAndUserAuditLogs(t *testing.T) {

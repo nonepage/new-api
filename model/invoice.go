@@ -92,6 +92,8 @@ type InvoiceRecordApplication struct {
 	CreatedAt       int64 `json:"created_at" gorm:"bigint"`
 }
 
+var minInvoiceApplicationAmount = decimal.NewFromInt(200)
+
 func (p *InvoiceProfile) BeforeCreate(tx *gorm.DB) error {
 	now := common.GetTimestamp()
 	p.CreatedAt = now
@@ -408,6 +410,9 @@ func CreateInvoiceApplication(userId int, topupIDs []int, snapshot InvoiceProfil
 		currency := ""
 		items := make([]InvoiceApplicationItem, 0, len(topups))
 		for _, topup := range topups {
+			if topup.SourceType == common.TopUpSourceSubscription {
+				return errors.New("订阅订单暂不支持开具发票")
+			}
 			amountDecimal := decimal.NewFromFloat(topup.GetEffectivePaidAmount()).Round(6)
 			if !amountDecimal.GreaterThan(decimal.Zero) {
 				return fmt.Errorf("order %s has invalid paid amount", topup.TradeNo)
@@ -425,6 +430,9 @@ func CreateInvoiceApplication(userId int, topupIDs []int, snapshot InvoiceProfil
 				Amount:       amountDecimal.InexactFloat64(),
 				Currency:     topupCurrency,
 			})
+		}
+		if !totalAmount.GreaterThan(minInvoiceApplicationAmount) {
+			return errors.New("开票申请总金额需大于 200 元，请在金额满足条件后再提交申请。")
 		}
 
 		application = &InvoiceApplication{
