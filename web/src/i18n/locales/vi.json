@@ -3890,6 +3890,12 @@
     "连接信息已填入": "Đã áp dụng thông tin kết nối",
     "无法读取剪贴板": "Không thể đọc bộ nhớ tạm",
     "页面渲染出错，请刷新页面重试": "Đã xảy ra lỗi khi hiển thị trang. Vui lòng tải lại trang và thử lại.",
-    "刷新页面": "Tải lại trang"
+    "刷新页面": "Tải lại trang",
+    "请再次确认折算操作": "Vui lòng xác nhận lại thao tác quy đổi",
+    "这是不可逆操作，请谨慎确认。": "Đây là thao tác không thể hoàn tác. Vui lòng xác nhận cẩn thận.",
+    "确认后，当前有效订阅将被取消。": "Sau khi xác nhận, gói đăng ký đang hoạt động hiện tại sẽ bị hủy.",
+    "订阅剩余权益会折算为钱包余额。": "Quyền lợi còn lại của gói đăng ký sẽ được quy đổi thành số dư ví.",
+    "操作完成后不可回退，请确认是否继续？": "Sau khi hoàn tất sẽ không thể khôi phục. Bạn có chắc muốn tiếp tục không?",
+    "继续折算": "Tiếp tục quy đổi"
   }
 }

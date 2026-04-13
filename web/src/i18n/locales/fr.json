@@ -3340,6 +3340,12 @@
     "连接信息已填入": "Informations de connexion appliquées",
     "无法读取剪贴板": "Impossible de lire le presse-papiers",
     "页面渲染出错，请刷新页面重试": "Une erreur est survenue lors du rendu de la page. Veuillez rafraîchir et réessayer.",
-    "刷新页面": "Recharger la page"
+    "刷新页面": "Recharger la page",
+    "请再次确认折算操作": "Veuillez reconfirmer la conversion",
+    "这是不可逆操作，请谨慎确认。": "Cette opération est irréversible. Veuillez confirmer avec prudence.",
+    "确认后，当前有效订阅将被取消。": "Après confirmation, l'abonnement actif actuel sera annulé.",
+    "订阅剩余权益会折算为钱包余额。": "Les avantages restants de l'abonnement seront convertis en solde du portefeuille.",
+    "操作完成后不可回退，请确认是否继续？": "Cette opération est définitive après exécution. Voulez-vous vraiment continuer ?",
+    "继续折算": "Continuer la conversion"
   }
 }

@@ -197,6 +197,29 @@ const SubscriptionPlansCard = ({
     }
   };
 
+  const confirmConvertToWallet = () => {
+    Modal.confirm({
+      title: t('请再次确认折算操作'),
+      content: (
+        <div className='space-y-2 text-sm text-gray-600'>
+          <div>{t('这是不可逆操作，请谨慎确认。')}</div>
+          <div>{t('确认后，当前有效订阅将被取消。')}</div>
+          <div>{t('订阅剩余权益会折算为钱包余额。')}</div>
+          <div className='text-red-500'>
+            {t('操作完成后不可回退，请确认是否继续？')}
+          </div>
+        </div>
+      ),
+      okText: t('继续折算'),
+      cancelText: t('取消'),
+      okType: 'danger',
+      centered: true,
+      onOk: async () => {
+        await handleConvertToWallet();
+      },
+    });
+  };
+
   const payStripe = async () => {
     if (!selectedPlan?.plan?.stripe_price_id) {
       showError(t('该套餐未配置 Stripe'));
@@ -392,7 +415,7 @@ const SubscriptionPlansCard = ({
         if (converting) return;
         setPreviewVisible(false);
       }}
-      onOk={handleConvertToWallet}
+      onOk={hasActiveSubscription ? confirmConvertToWallet : handleConvertToWallet}
       confirmLoading={converting}
       okText={conversionConfirmText}
       cancelText={t('取消')}

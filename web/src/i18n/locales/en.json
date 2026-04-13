@@ -3384,6 +3384,12 @@
     "连接信息已填入": "Connection info applied",
     "无法读取剪贴板": "Cannot read clipboard",
     "页面渲染出错，请刷新页面重试": "An error occurred while rendering the page. Please refresh and try again.",
-    "刷新页面": "Reload Page"
+    "刷新页面": "Reload Page",
+    "请再次确认折算操作": "Please confirm the conversion again",
+    "这是不可逆操作，请谨慎确认。": "This action is irreversible. Please confirm carefully.",
+    "确认后，当前有效订阅将被取消。": "After confirmation, the current active subscription will be canceled.",
+    "订阅剩余权益会折算为钱包余额。": "The remaining subscription benefits will be converted into wallet balance.",
+    "操作完成后不可回退，请确认是否继续？": "This cannot be undone after completion. Are you sure you want to continue?",
+    "继续折算": "Continue Conversion"
   }
 }
