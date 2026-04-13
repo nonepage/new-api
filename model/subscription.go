@@ -1174,6 +1174,13 @@ func buildSubscriptionConversionPreview(userGroupBefore string, userGroupAfter s
 	}, nil
 }
 
+func resolveSubscriptionWalletConversionTargetGroupTx(tx *gorm.DB, userId int, userGroup string, activeSubscriptionCount int, now int64) (string, error) {
+	if activeSubscriptionCount > 0 {
+		return getSubscriptionBaseUserGroupTx(tx, userId, userGroup)
+	}
+	return getDefaultUserGroupName(), nil
+}
+
 func PreviewSubscriptionWalletConversion(userId int) (*SubscriptionConversionPreview, error) {
 	if userId <= 0 {
 		return nil, errors.New("invalid userId")
@@ -1187,12 +1194,9 @@ func PreviewSubscriptionWalletConversion(userId int) (*SubscriptionConversionPre
 	if err != nil {
 		return nil, err
 	}
-	targetGroup := getDefaultUserGroupName()
-	if len(entries) > 0 {
-		targetGroup, err = getSubscriptionBaseUserGroupTx(nil, userId, userGroup)
-		if err != nil {
-			return nil, err
-		}
+	targetGroup, err := resolveSubscriptionWalletConversionTargetGroupTx(nil, userId, userGroup, len(entries), now)
+	if err != nil {
+		return nil, err
 	}
 	return buildSubscriptionConversionPreview(userGroup, targetGroup, entries, now)
 }
@@ -1243,13 +1247,11 @@ func ExecuteSubscriptionWalletConversion(userId int, requestId string) (*Subscri
 		if err != nil {
 			return err
 		}
-		targetGroup := getDefaultUserGroupName()
-		if len(entries) > 0 {
-			targetGroup, err = getSubscriptionBaseUserGroupTx(tx, userId, userGroup)
-			if err != nil {
-				return err
-			}
-		} else if strings.TrimSpace(userGroup) == strings.TrimSpace(targetGroup) {
+		targetGroup, err := resolveSubscriptionWalletConversionTargetGroupTx(tx, userId, userGroup, len(entries), now)
+		if err != nil {
+			return err
+		}
+		if len(entries) == 0 && strings.TrimSpace(userGroup) == strings.TrimSpace(targetGroup) {
 			return errors.New("no active subscriptions to convert")
 		}
 		preview, err := buildSubscriptionConversionPreview(userGroup, targetGroup, entries, now)
@@ -1340,7 +1342,7 @@ func ExecuteSubscriptionWalletConversion(userId int, requestId string) (*Subscri
 			}
 		}
 
-		targetGroup, _, err = syncUserGroupForActiveSubscriptionsTx(tx, userId, now)
+		targetGroup, _, err = syncUserGroupForEndedSubscriptionTx(tx, userId, "", now)
 		if err != nil {
 			return err
 		}

@@ -238,6 +238,42 @@ func TestPreviewSubscriptionWalletConversion_NoActiveSubscriptionsFallsBackToDef
 	assert.Equal(t, "default", preview.Summary.UserGroupAfter)
 }
 
+func TestPreviewSubscriptionWalletConversion_NoActiveSubscriptionsIgnoresHistoricalBaseGroup(t *testing.T) {
+	prepareSubscriptionConversionTest(t)
+
+	user := createSubscriptionConversionUser(t, "vip", 1000)
+	now := GetDBTimestamp()
+	plan := createSubscriptionConversionPlan(t, "Expired VIP Monthly", 10, "vip")
+	subscription := &UserSubscription{
+		UserId:           user.Id,
+		PlanId:           plan.Id,
+		AmountTotal:      1000,
+		AmountUsed:       100,
+		StartTime:        now - 20000,
+		EndTime:          now - 100,
+		Status:           SubscriptionStatusExpired,
+		Source:           "order",
+		UpgradeGroup:     "vip",
+		PrevUserGroup:    "staff",
+		CancelReason:     "",
+		CancelledAt:      0,
+		LastResetTime:    0,
+		NextResetTime:    0,
+		CreatedAt:        common.GetTimestamp(),
+		UpdatedAt:        common.GetTimestamp(),
+		PurchaseCurrency: "USD",
+	}
+	require.NoError(t, DB.Create(subscription).Error)
+
+	preview, err := PreviewSubscriptionWalletConversion(user.Id)
+	require.NoError(t, err)
+	require.NotNil(t, preview)
+	assert.True(t, preview.Summary.CanConvert)
+	assert.Equal(t, 0, preview.Summary.SubscriptionCount)
+	assert.Equal(t, "vip", preview.Summary.UserGroupBefore)
+	assert.Equal(t, "default", preview.Summary.UserGroupAfter)
+}
+
 func TestExecuteSubscriptionWalletConversion_NoActiveSubscriptionsResetsToDefaultGroup(t *testing.T) {
 	prepareSubscriptionConversionTest(t)
 
@@ -253,6 +289,47 @@ func TestExecuteSubscriptionWalletConversion_NoActiveSubscriptionsResetsToDefaul
 	assert.Equal(t, 0.0, result.TotalRefundMoney)
 	assert.Equal(t, int64(0), result.TotalRefundQuota)
 	assert.Equal(t, "vip", result.UserGroupBefore)
+	assert.Equal(t, "default", result.UserGroupAfter)
+
+	var refreshed User
+	require.NoError(t, DB.First(&refreshed, user.Id).Error)
+	assert.Equal(t, "default", refreshed.Group)
+}
+
+func TestExecuteSubscriptionWalletConversion_NoActiveSubscriptionsResetsHistoricalBaseGroupToDefault(t *testing.T) {
+	prepareSubscriptionConversionTest(t)
+
+	user := createSubscriptionConversionUser(t, "staff", 1000)
+	now := GetDBTimestamp()
+	plan := createSubscriptionConversionPlan(t, "Expired VIP Monthly", 10, "vip")
+	subscription := &UserSubscription{
+		UserId:           user.Id,
+		PlanId:           plan.Id,
+		AmountTotal:      1000,
+		AmountUsed:       100,
+		StartTime:        now - 20000,
+		EndTime:          now - 100,
+		Status:           SubscriptionStatusExpired,
+		Source:           "order",
+		UpgradeGroup:     "vip",
+		PrevUserGroup:    "staff",
+		PurchaseCurrency: "USD",
+		CreatedAt:        common.GetTimestamp(),
+		UpdatedAt:        common.GetTimestamp(),
+	}
+	require.NoError(t, DB.Create(subscription).Error)
+
+	preview, err := PreviewSubscriptionWalletConversion(user.Id)
+	require.NoError(t, err)
+	require.NotNil(t, preview)
+	assert.True(t, preview.Summary.CanConvert)
+	assert.Equal(t, "default", preview.Summary.UserGroupAfter)
+
+	result, err := ExecuteSubscriptionWalletConversion(user.Id, fmt.Sprintf("reset-historical-group-%d", time.Now().UnixNano()))
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.Equal(t, 0, result.SubscriptionCount)
+	assert.Equal(t, "staff", result.UserGroupBefore)
 	assert.Equal(t, "default", result.UserGroupAfter)
 
 	var refreshed User
@@ -665,7 +742,7 @@ func TestAdminInvalidateUserSubscription_LastUpgradeFallsBackToDefaultGroup(t *t
 	assert.Equal(t, "default", refreshed.Group)
 }
 
-func TestExecuteSubscriptionWalletConversion_PreservesNonDefaultBaseGroup(t *testing.T) {
+func TestExecuteSubscriptionWalletConversion_ResetsToDefaultGroupAfterCancellingActiveSubscriptions(t *testing.T) {
 	prepareSubscriptionConversionTest(t)
 
 	user := createSubscriptionConversionUser(t, "staff", 1000)
@@ -682,11 +759,11 @@ func TestExecuteSubscriptionWalletConversion_PreservesNonDefaultBaseGroup(t *tes
 	result, err := ExecuteSubscriptionWalletConversion(user.Id, fmt.Sprintf("staff-req-%d", time.Now().UnixNano()))
 	require.NoError(t, err)
 	require.NotNil(t, result)
-	assert.Equal(t, "staff", result.UserGroupAfter)
+	assert.Equal(t, "default", result.UserGroupAfter)
 
 	var refreshed User
 	require.NoError(t, DB.First(&refreshed, user.Id).Error)
-	assert.Equal(t, "staff", refreshed.Group)
+	assert.Equal(t, "default", refreshed.Group)
 }
 
 func TestAdminDeleteUserSubscription_FallsBackAfterDeletingLastUpgrade(t *testing.T) {
