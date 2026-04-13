@@ -86,10 +86,12 @@ const InvoiceAdminPage = () => {
     loadData();
   }, []);
 
-  const reviewAction = async (id, action) => {
+  const reviewAction = async (id, action, options = {}) => {
+    const { onSuccess } = options;
     const payload = {
       admin_remark: remark,
     };
+
     if (action === 'reject') {
       let rejectedReason = '';
       let confirmed = false;
@@ -116,6 +118,7 @@ const InvoiceAdminPage = () => {
       }
       payload.rejected_reason = rejectedReason;
     }
+
     try {
       const res = await API.post(
         `/api/invoice/admin/applications/${id}/${action}`,
@@ -127,6 +130,7 @@ const InvoiceAdminPage = () => {
             ? t('申请已通过，并已直接标记为开票成功')
             : t('申请已驳回'),
         );
+        onSuccess?.();
         await loadData();
       } else {
         showError(res.data.message);
@@ -185,14 +189,6 @@ const InvoiceAdminPage = () => {
               onClick={() => copyInvoiceApplicationInfo(record, t)}
             >
               {t('复制信息')}
-            </Button>
-            <Button
-              size='small'
-              theme='solid'
-              disabled={record.status !== 'pending_review'}
-              onClick={() => reviewAction(record.id, 'approve')}
-            >
-              {t('通过并完成开票')}
             </Button>
             <Button
               size='small'
@@ -369,6 +365,19 @@ const InvoiceAdminPage = () => {
             >
               {t('复制信息')}
             </Button>
+            {detailApplication?.status === 'pending_review' ? (
+              <Button
+                theme='solid'
+                loading={loading}
+                onClick={() =>
+                  reviewAction(detailApplication.id, 'approve', {
+                    onSuccess: () => setDetailApplication(null),
+                  })
+                }
+              >
+                {t('通过并完成开票')}
+              </Button>
+            ) : null}
             <Button onClick={() => setDetailApplication(null)}>
               {t('关闭')}
             </Button>

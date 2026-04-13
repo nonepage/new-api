@@ -242,6 +242,18 @@ export const InvoiceApplicationDetails = ({
         <Button
           size='small'
           onClick={() =>
+            copyInvoiceField(
+              formatAmount(application.total_amount, application.currency),
+              t('订单金额已复制'),
+              t,
+            )
+          }
+        >
+          {t('复制订单金额')}
+        </Button>
+        <Button
+          size='small'
+          onClick={() =>
             copyInvoiceField(snapshot.title, t('开票抬头已复制'), t)
           }
         >
