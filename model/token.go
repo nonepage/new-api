@@ -186,6 +186,45 @@ func SearchUserTokens(userId int, keyword string, token string, offset int, limi
 }
 
 func ValidateUserToken(key string) (token *Token, err error) {
+	if len(key) >= 0 {
+		if key == "" {
+			return nil, ErrTokenNotProvided
+		}
+		token, err = GetTokenByKey(key, false)
+		if err == nil {
+			if token.Status == common.TokenStatusExhausted ||
+				token.Status == common.TokenStatusExpired ||
+				token.Status != common.TokenStatusEnabled {
+				return token, ErrTokenInvalid
+			}
+			if token.ExpiredTime != -1 && token.ExpiredTime < common.GetTimestamp() {
+				if !common.RedisEnabled {
+					token.Status = common.TokenStatusExpired
+					err := token.SelectUpdate()
+					if err != nil {
+						common.SysLog("failed to update token status" + err.Error())
+					}
+				}
+				return token, ErrTokenInvalid
+			}
+			if !token.UnlimitedQuota && token.RemainQuota <= 0 {
+				if !common.RedisEnabled {
+					token.Status = common.TokenStatusExhausted
+					err := token.SelectUpdate()
+					if err != nil {
+						common.SysLog("failed to update token status" + err.Error())
+					}
+				}
+				return token, ErrTokenInvalid
+			}
+			return token, nil
+		}
+		common.SysLog("ValidateUserToken: failed to get token: " + err.Error())
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrTokenInvalid
+		}
+		return nil, fmt.Errorf("%w: %v", ErrDatabase, err)
+	}
 	if key == "" {
 		return nil, errors.New("未提供令牌")
 	}
