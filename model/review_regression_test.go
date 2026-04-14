@@ -350,7 +350,7 @@ func TestCreateInvoiceApplication_RejectsSubscriptionOrders(t *testing.T) {
 	assert.Equal(t, common.InvoiceStatusNone, reloaded.InvoiceStatus)
 }
 
-func TestCreateInvoiceApplication_RejectsAmountAtOrBelowMinimum(t *testing.T) {
+func TestCreateInvoiceApplication_RejectsAmountBelowMinimum(t *testing.T) {
 	prepareReviewRegressionTest(t)
 
 	user := createReviewTestUser(t, "invoice-minimum-user", 0, "", "")
@@ -358,7 +358,7 @@ func TestCreateInvoiceApplication_RejectsAmountAtOrBelowMinimum(t *testing.T) {
 		UserId:        user.Id,
 		TradeNo:       "invoice-minimum-topup",
 		Status:        common.TopUpStatusSuccess,
-		PaidAmount:    200,
+		PaidAmount:    199.99,
 		PaidCurrency:  "CNY",
 		InvoiceStatus: common.InvoiceStatusNone,
 		PaymentMethod: "alipay",
@@ -375,7 +375,36 @@ func TestCreateInvoiceApplication_RejectsAmountAtOrBelowMinimum(t *testing.T) {
 		Email: "invoice@example.com",
 	}, "amount threshold should fail")
 	require.Nil(t, application)
-	require.EqualError(t, err, "开票申请总金额需大于 200 元，请在金额满足条件后再提交申请。")
+	require.EqualError(t, err, "开票申请总金额需大于等于 200 元，请在金额满足条件后再提交申请。")
+}
+
+func TestCreateInvoiceApplication_AllowsAmountAtMinimum(t *testing.T) {
+	prepareReviewRegressionTest(t)
+
+	user := createReviewTestUser(t, "invoice-minimum-allowed-user", 0, "", "")
+	topup := &TopUp{
+		UserId:        user.Id,
+		TradeNo:       "invoice-minimum-allowed-topup",
+		Status:        common.TopUpStatusSuccess,
+		PaidAmount:    200,
+		PaidCurrency:  "CNY",
+		InvoiceStatus: common.InvoiceStatusNone,
+		PaymentMethod: "alipay",
+		SourceType:    common.TopUpSourceWalletTopUp,
+		CreateTime:    time.Now().Unix(),
+		CompleteTime:  time.Now().Unix(),
+	}
+	require.NoError(t, DB.Create(topup).Error)
+
+	application, err := CreateInvoiceApplication(user.Id, []int{topup.Id}, InvoiceProfileSnapshot{
+		Type:  "company",
+		Title: "QuantumNous",
+		TaxNo: "TAX-MIN-ALLOW-001",
+		Email: "invoice@example.com",
+	}, "amount threshold should pass")
+	require.NoError(t, err)
+	require.NotNil(t, application)
+	assert.Equal(t, "200.000000", decimal.NewFromFloat(application.TotalAmount).StringFixed(6))
 }
 
 func TestApproveInvoiceApplication_WritesAdminAndUserAuditLogs(t *testing.T) {

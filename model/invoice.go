@@ -431,8 +431,8 @@ func CreateInvoiceApplication(userId int, topupIDs []int, snapshot InvoiceProfil
 				Currency:     topupCurrency,
 			})
 		}
-		if !totalAmount.GreaterThan(minInvoiceApplicationAmount) {
-			return errors.New("开票申请总金额需大于 200 元，请在金额满足条件后再提交申请。")
+		if totalAmount.LessThan(minInvoiceApplicationAmount) {
+			return errors.New("开票申请总金额需大于等于 200 元，请在金额满足条件后再提交申请。")
 		}
 
 		application = &InvoiceApplication{

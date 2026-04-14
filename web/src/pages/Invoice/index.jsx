@@ -436,8 +436,8 @@ const InvoicePage = () => {
           (sum, order) => sum + getInvoiceOrderAmount(order),
           0,
         );
-        if (totalAmount <= INVOICE_MIN_AMOUNT) {
-          showError(t('开票申请总金额需大于 200 元，请在金额满足条件后再提交申请。'));
+        if (totalAmount < INVOICE_MIN_AMOUNT) {
+          showError(t('开票申请总金额需大于等于 200 元，请在金额满足条件后再提交申请。'));
           return;
         }
       }
@@ -511,7 +511,7 @@ const InvoicePage = () => {
             type='info'
             closeIcon={null}
             description={t(
-              '仅展示支付成功且尚未进入开票流程的订单。订阅订单暂不支持开具发票，且开票申请总金额需大于 200 元。提交时必须填写抬头、税号、邮箱。',
+              '仅展示支付成功且尚未进入开票流程的订单。订阅订单暂不支持开具发票，且开票申请总金额需大于等于 200 元。提交时必须填写抬头、税号、邮箱。',
             )}
           />
           <Card className='mt-4' loading={loading}>
